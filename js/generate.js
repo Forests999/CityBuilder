@@ -57,10 +57,24 @@ export function prepGuides(polys) {
   return { list, key: list.length + ':' + h };
 }
 
+// Density gradient: block size grows or shrinks with distance from a point. "edge" makes the
+// blocks tighter toward the outskirts (big blocks in the middle); "center" does the opposite.
+// Districts that should stay seamless with each other share the same centre and radius.
+function gradientOf(f, shape) {
+  const mode = f.gradMode || 'none';
+  if (mode === 'none' || !(+f.gradStrength > 0)) return null;
+  const c = Array.isArray(f.gradCenter) && f.gradCenter.length === 2 ? f.gradCenter : centroid(shape);
+  let r = +f.gradRadius || 0;
+  if (!r) for (const p of shape) r = Math.max(r, dist(p, c));
+  return { mode, strength: +f.gradStrength, c, r: Math.max(r, 1) };
+}
+
 export function districtGen(f, shape, center, guides) {
   const look = f.look || 'blocks';
+  const grad = gradientOf(f, shape);
   const key = ['d', f.pattern, f.blockSize, f.streetWidth, f.irregularity, f.warp, f.gridAngle, f.lots, f.courtyards, f.seed, look,
     look === 'garden' ? f.treeSpacing + ',' + f.treeDensity : look === 'cemetery' ? f.graveSpacing : '',
+    grad ? [grad.mode, grad.strength, Math.round(grad.c[0]), Math.round(grad.c[1]), Math.round(grad.r)].join(',') : '',
     guides && guides.list.length ? guides.key : '',
     f.pattern === 'radial' ? center.map(Math.round).join(',') : '', shapeKey(shape)].join('|');
   return remember(key, () => {
@@ -68,7 +82,7 @@ export function districtGen(f, shape, center, guides) {
       pattern: f.pattern, blockSize: Math.max(6, +f.blockSize || 38), streetWidth: +f.streetWidth || 4,
       irregularity: +f.irregularity || 0, warp: +f.warp || 0, gridAngle: +f.gridAngle || 0,
       lots: !!f.lots, courtyards: +f.courtyards || 0, seed: (f.seed >>> 0) || 1, center,
-      leaves: look !== 'blocks', guides: guides && guides.list.length ? guides.list : null,
+      leaves: look !== 'blocks', guides: guides && guides.list.length ? guides.list : null, grad,
     });
     g.decor = look !== 'blocks' ? lookDecor(f, shape, g, look) : null;
     return g;
@@ -259,7 +273,12 @@ function subdivide(shape, o) {
     if (!full) { state = overlapState(poly, shape, sb); if (state === 0) continue; }
     const rnd = mulberry32(hash);
     const area = Math.abs(polyArea(poly));
-    if (area < target * (0.6 + rnd() * 0.9) || depth > 60 || count > MAX) { count++; leaf(poly, hash); continue; }
+    let gf = 1;
+    if (o.grad) {
+      const t = Math.max(0, Math.min(1, dist(centroid(poly), o.grad.c) / o.grad.r)), s = o.grad.strength * 1.2;
+      gf = o.grad.mode === 'edge' ? 1 + s * (1 - t) : 1 + s * t;
+    }
+    if (area < target * gf * gf * (0.6 + rnd() * 0.9) || depth > 60 || count > MAX) { count++; leaf(poly, hash); continue; }
     const r = o.pattern === 'organic'
       ? edgeCut(poly, 0.1 + irr * 0.5, irr * 0.6, rnd, true)
       : cut(poly, chooseNormal(poly, centroid(poly), rnd), 0.1 + irr * 0.6, rnd);

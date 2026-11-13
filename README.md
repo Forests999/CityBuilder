@@ -2,9 +2,17 @@
 
 A browser-based editor for hand-inked fantasy city maps, made for illustrating cities in a homebrew RPG setting book.
 
-You draw the big shapes (wall, rivers, avenues, districts) and the street network fills itself in: dense, crooked alleys in the slums, radial rings around the citadel, planned grids by the docks. Everything stays editable and draggable, and you can export a high-resolution PNG for print.
-
 **Use it:** https://forests999.github.io/CityBuilder/
+
+## The quick way to a city
+
+1. Press **✨ Generate** (or File → Generate a city…).
+2. **Draw outline** (sketch the shape of your city) or **Use selected area**, or leave it blank for a random shape.
+3. Pick the number of districts, density, wall, gates, river, farmland and press **Generate city**.
+
+You get a complete, fully editable map: a wall with gates, districts split from your outline and styled by distance from the centre (noble core, townhouses, markets, parks, slums, industry), main roads and a ring road, plazas, large buildings, landmarks, a river and farmland. Ctrl+Z undoes it.
+
+Then refine: select any district and use **Split into districts automatically** to carve it into smaller, differently styled districts, or tune its **Block density** (tighter toward the edge or the centre, like the dense outskirts of a real medieval city).
 
 ## Recommended workflow
 
@@ -73,7 +81,7 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 | `js/render.js` | Draws a map document to a canvas (screen and export) |
 | `js/generate.js` | Procedural street networks and district presets |
 | `js/state.js` | Document model, defaults, undo/redo, autosave |
-| `js/starter.js` | The "Random city" generator |
+| `js/citygen.js` | City generator (outline → districts, roads, river, farmland) and district splitting |
 | `js/ui.js` | Property panel schemas and form builder |
 | `js/themes.js` | Color themes and fonts |
 | `js/geom.js`, `js/rng.js` | Geometry helpers, seeded randomness and noise |
@@ -97,3 +105,9 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 - **Align streets to roads:** generated organic streets near a hand-drawn road or river run parallel or at right angles to it (toggle per district; grid and radial patterns ignore it on purpose).
 - **Street names (Y):** click a road to add a name that runs along its curve; drag it to slide it along.
 - **Snap (toolbar, Shift+G):** snaps to corner points and onto edges, shows alignment guides when points line up horizontally or vertically, optional grid, and Shift while drawing locks to 15° steps. Hold Alt to bypass for one action. All of it can be switched off in the Snap menu.
+
+## Interface layout
+
+- **Top bar:** File menu (new, generate, open, save, export), undo/redo/fit, Snap, ✨ Generate, Export PNG.
+- **Toolbar:** six groups (select, areas, lines & walls, places, text & compass, edit). Click a group for its current tool; use the corner arrow or right-click for the rest.
+- **Right panel:** *Edit* (properties of the selection, in collapsible sections whose open/closed state is remembered), *Layers*, *Generate* (city wizard and kits) and *Map* (page, theme, decoration, colors, tracing image).

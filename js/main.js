@@ -3,12 +3,14 @@
 import * as S from './state.js';
 import * as G from './geom.js';
 import { renderMap, releaseLayers, plazaCorners, featureShape, isClosed, isPointType, getColors, findWalls } from './render.js';
-import { SCHEMAS, buildForm, el } from './ui.js';
-import { randomCity } from './starter.js';
+import { SCHEMAS, buildForm, collapsible, el } from './ui.js';
+import * as CG from './citygen.js';
 import { shapePoints } from './shapes.js';
 import { THEMES, COLOR_KEYS, FONTS } from './themes.js';
 import * as SN from './snap.js';
 import { KITS, defaultKitState } from './kits.js';
+import { makeRng } from './rng.js';
+import { PRESETS } from './generate.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#map');
@@ -21,6 +23,9 @@ let dpr = window.devicePixelRatio || 1;
 const app = {
   tool: 'select', _sel: null, selSet: new Set(), drawing: null, drag: null, hover: null, snap: null, guides: { gx: null, gy: null },
   hits: [], space: false, mouse: null, tab: 'props', marquee: null, kit: null, kitState: defaultKitState(),
+  genOutline: null, exportScale: 2,
+  gen: { districts: 6, gates: 6, walled: true, river: 'through', ring: true, farmland: true, density: 'edge', halls: 6, splitMode: 'center', size: 650, seed: Math.floor(Math.random() * 1e9), clear: true },
+  split: { n: 5, mode: 'center', vary: true },
 };
 Object.defineProperty(app, 'sel', {
   get() { return this._sel; },
@@ -73,8 +78,21 @@ const TOOLS = [
   { id: 'streetName', key: 'y', type: 'label', draw: 'point', label: 'Street name', hint: 'Click on a road to add a street name that runs along it (drag it to slide it along the road)' },
   { id: 'compass', key: 'c', type: 'compass', draw: 'point', label: 'Compass rose', hint: 'Click to place a compass rose' },
   { id: 'kit', hidden: true, draw: 'point', label: 'Place kit', hint: 'Click where the kit should go · Esc cancels' },
+  { id: 'outline', hidden: true, draw: 'poly', label: 'Draw city outline', hint: 'Sketch the outline of your city (drag to draw freehand, or click corners) · double-click or Enter to finish · Esc cancels' },
 ];
 const toolById = (id) => TOOLS.find((t) => t.id === id);
+
+// The toolbar shows one button per group; the arrow (or right-click) opens the rest of the group.
+const TOOL_GROUPS = [
+  { id: 'select', label: 'Select', tools: ['select'] },
+  { id: 'areas', label: 'Areas', tools: ['district', 'farm', 'water', 'cutout'] },
+  { id: 'lines', label: 'Lines & walls', tools: ['wall', 'river', 'canal', 'road', 'street', 'rural'] },
+  { id: 'places', label: 'Places', tools: ['plaza', 'plazaSq', 'building', 'buildingShape', 'landmark'] },
+  { id: 'text', label: 'Text & compass', tools: ['label', 'streetName', 'compass'] },
+  { id: 'edit', label: 'Edit areas', tools: ['split'] },
+];
+for (const g of TOOL_GROUPS) g.current = g.tools[0];
+const groupOf = (toolId) => TOOL_GROUPS.find((g) => g.tools.includes(toolId));
 
 // ---------- view ----------
 const toScreen = (p) => [p[0] * view.s + view.ox, p[1] * view.s + view.oy];
@@ -201,6 +219,12 @@ function drawGrid() {
 function drawOverlay() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawGrid();
+  if (app.genOutline) {
+    strokeScreen(app.genOutline, true, 'rgba(0,0,0,.55)', 5);
+    strokeScreen(app.genOutline, true, '#ffb547', 2.5, [10, 6]);
+    ctx.fillStyle = 'rgba(255,181,71,.08)';
+    ctx.beginPath(); app.genOutline.forEach((p, i) => { const q = toScreen(p); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); ctx.fill();
+  }
   const hov = app.hover && !app.selSet.has(app.hover) ? S.byId(app.hover) : null;
   if (hov && app.tool === 'select' && !app.drag) strokeScreen(outlineOf(hov), closedOutline(hov), 'rgba(80,170,255,.55)', 2);
   const multi = app.selSet.size > 1;
@@ -315,7 +339,9 @@ function setTool(id) {
   app.tool = id;
   if (id !== 'split') app.splitTarget = null;
   if (id !== 'kit') app.kit = null;
-  document.querySelectorAll('.tool').forEach((b) => b.classList.toggle('active', b.dataset.tool === id));
+  const grp = groupOf(id);
+  if (grp) grp.current = id;
+  syncToolbar();
   canvas.style.cursor = id === 'select' ? 'default' : 'crosshair';
   if (!app.sel) renderPanel();
   updateStatus();
@@ -332,6 +358,7 @@ function finishDrawing() {
   const min = t.draw === 'poly' ? 3 : 2;
   if (pts.length < min) { requestRender(); return; }
   if (t.id === 'split') { splitAreas(pts, d.target); return; }
+  if (t.id === 'outline') { setGenOutline(pts); return; }
   const f = S.createFeature(t.type, pts, t.extra || {});
   S.insertFeature(f);
   app.sel = f.id;
@@ -522,6 +549,7 @@ function distributeSel(axis) {
 const ctxHelpers = {
   haloDefault() { return S.getDoc().settings.haloWidth ?? 0.34; },
   detachLabel(f) { f.pathId = ''; S.commit(); },
+  autoSplitUI(target, f) { buildAutoSplit(target, f); },
   // Rebuild a preset-shaped building around its current centre.
   reshapeBuilding(f) {
     if (f.shape === 'free' || !f.points.length) return;
@@ -798,6 +826,7 @@ window.addEventListener('keydown', (e) => {
   if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); setTool('select'); setMulti(S.getDoc().features.filter((f) => !f.hidden && !f.locked).map((f) => f.id)); return; }
   if (e.key === ' ') { app.space = true; canvas.style.cursor = 'grab'; e.preventDefault(); return; }
   if (e.key === 'Escape') {
+    if (!$('#popMenu').classList.contains('hidden')) { closeMenu(); return; }
     if (app.drawing) { app.drawing = null; clearSnap(); requestRender(); }
     else if (app.tool !== 'select') setTool('select');
     else select(null);
@@ -816,18 +845,72 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { if (e.key === ' ') { app.space = false; canvas.style.cursor = app.tool === 'select' ? 'default' : 'crosshair'; } });
 
 // ---------- panels ----------
+function svgIcon(id) { return `<svg viewBox="0 0 24 24">${ICON[id] || ''}</svg>`; }
+
 function renderTools() {
   const nav = $('#tools');
   nav.innerHTML = '';
-  for (const t of TOOLS) {
-    if (t.hidden) continue;
-    const b = el('button', { class: 'tool' + (t.id === app.tool ? ' active' : ''), 'data-tool': t.id, title: `${t.label} (${t.key.toUpperCase()})` });
-    b.innerHTML = `<svg viewBox="0 0 24 24">${ICON[t.id]}</svg>`;
-    b.addEventListener('click', () => setTool(t.id));
+  for (const g of TOOL_GROUPS) {
+    const b = el('button', { class: 'tool', 'data-group': g.id });
+    b.dataset.menuAnchor = '1';
+    b.append(el('span', { class: 'ticon' }));
+    if (g.tools.length > 1) {
+      const caret = el('span', { class: 'caret', title: `More ${g.label.toLowerCase()} tools` });
+      caret.addEventListener('click', (e) => { e.stopPropagation(); openToolFlyout(g, b); });
+      b.append(caret);
+    }
+    b.addEventListener('click', () => setTool(g.current));
+    b.addEventListener('contextmenu', (e) => { e.preventDefault(); if (g.tools.length > 1) openToolFlyout(g, b); });
     nav.append(b);
-    if (t.id === 'select' || t.id === 'water' || t.id === 'rural') nav.append(el('div', { class: 'sep' }));
+    if (g.id === 'select') nav.append(el('div', { class: 'sep' }));
   }
+  syncToolbar();
 }
+
+// Show each group's current tool and highlight the group that holds the active tool.
+function syncToolbar() {
+  document.querySelectorAll('#tools .tool').forEach((b) => {
+    const g = TOOL_GROUPS.find((x) => x.id === b.dataset.group), t = toolById(g.current);
+    b.classList.toggle('active', g.tools.includes(app.tool));
+    b.querySelector('.ticon').innerHTML = svgIcon(g.current);
+    b.title = `${t.label} (${t.key.toUpperCase()})` + (g.tools.length > 1 ? ' — use the corner arrow or right-click for the rest of this group' : '');
+  });
+}
+
+function openToolFlyout(g, anchor) {
+  const r = anchor.getBoundingClientRect();
+  showMenu({ x: r.right + 6, y: r.top }, g.tools.map((id) => {
+    const t = toolById(id);
+    return { icon: id, label: t.label, hint: t.key.toUpperCase(), active: app.tool === id, onClick: () => setTool(id) };
+  }), 'tools-' + g.id);
+}
+
+// A small popup menu used by the File menu and the tool groups.
+let menuOwner = null;
+function showMenu(pos, items, owner) {
+  const m = $('#popMenu');
+  if (!m.classList.contains('hidden') && owner && menuOwner === owner) { closeMenu(); return; }
+  menuOwner = owner || null;
+  m.innerHTML = '';
+  for (const it of items) {
+    if (it.sep) { m.append(el('div', { class: 'msep' })); continue; }
+    if (it.head) { m.append(el('div', { class: 'mhead' }, it.head)); continue; }
+    const row = el('button', { class: 'mitem' + (it.active ? ' active' : ''), type: 'button' });
+    if (it.icon) { const i = el('span', { class: 'micon' }); i.innerHTML = svgIcon(it.icon); row.append(i); }
+    row.append(el('span', { class: 'mlabel' }, it.label));
+    if (it.hint) row.append(el('span', { class: 'mhint' }, it.hint));
+    row.addEventListener('click', () => { closeMenu(); it.onClick(); });
+    m.append(row);
+  }
+  m.classList.remove('hidden');
+  m.style.left = Math.max(4, Math.min(pos.x, window.innerWidth - m.offsetWidth - 8)) + 'px';
+  m.style.top = Math.max(4, Math.min(pos.y, window.innerHeight - m.offsetHeight - 8)) + 'px';
+}
+function closeMenu() { $('#popMenu').classList.add('hidden'); menuOwner = null; }
+document.addEventListener('pointerdown', (e) => {
+  const m = $('#popMenu');
+  if (!m.classList.contains('hidden') && !m.contains(e.target) && !e.target.closest('[data-menu-anchor]')) closeMenu();
+}, true);
 
 const colorDefault = (k, obj) => {
   const C = getColors(S.getDoc());
@@ -842,7 +925,7 @@ function renderPanel() {
   body.innerHTML = '';
   if (app.tab === 'props') renderProps(body);
   else if (app.tab === 'layers') renderLayers(body);
-  else if (app.tab === 'kits') renderKits(body);
+  else if (app.tab === 'gen') renderGenerate(body);
   else renderMapSettings(body);
 }
 
@@ -891,9 +974,9 @@ function renderProps(body) {
       el('ul', { class: 'tips' },
         el('li', {}, 'Scroll to zoom, drag empty space (or hold Space / right-drag) to pan.'),
         el('li', {}, 'Click anything on the map to edit it here; Shift-click or Shift-drag to select several.'),
-        el('li', {}, 'The Kits tab places ready-made groups: a city center, market square, cemetery, park or keep.'),
+        el('li', {}, 'The Generate tab builds a whole city from an outline and places kits: market square, cemetery, park, keep.'),
         el('li', {}, 'Snapping and alignment guides are in the toolbar; hold Alt to bypass them for one action.'),
-        el('li', {}, 'Everything autosaves in this browser. Use Save to keep a .json file.')),
+        el('li', {}, 'Everything autosaves in this browser. Use File → Save to keep a .json file.')),
     );
     return;
   }
@@ -925,19 +1008,132 @@ function renderProps(body) {
 
 const TYPE_ICON = { wall: 'wall', district: 'district', cutout: 'cutout', farm: 'farm', water: 'water', river: 'river', road: 'road', plaza: 'plaza', building: 'building', landmark: 'landmark', label: 'label', compass: 'compass' };
 
-function renderKits(body) {
-  body.append(el('p', { class: 'info' }, 'Kits generate a whole group of features at once. Pick a kit, set its size and seed, press Place, then click the map. The pieces arrive selected together, so you can drag them into position as one, then restyle any piece afterwards.'));
+// ---------- Generate tab: city wizard + kits ----------
+function setGenOutline(pts) {
+  // Turn the rough sketch into a clean, smooth outline.
+  let o = pts.map((p) => p.slice());
+  if (o.length >= 4) o = CG.simplifyClosed(G.smoothPoints(o, true, 24), 2);
+  app.genOutline = o;
+  setTool('select');
+  app.tab = 'gen';
+  renderPanel(); requestRender();
+  toast('Outline set. Choose the options on the Generate tab, then press Generate city.');
+}
+
+function useSelectedAsOutline() {
+  const f = app.sel && S.byId(app.sel);
+  if (!f || !isClosed(f) || isPointType(f)) { toast('Select a district, wall, lake or another closed area first, then press this again.'); return; }
+  const sh = featureShape(f, S.getDoc());
+  if (sh.length < 3) { toast('That item has no outline to use.'); return; }
+  app.genOutline = CG.simplifyClosed(sh, 2);
+  app.tab = 'gen';
+  renderPanel(); requestRender();
+  toast('Using the selected area as the outline.');
+}
+
+function runGenerate() {
+  const doc = S.getDoc(), g = app.gen;
+  const out = CG.generateCity({ ...g, outline: app.genOutline, W: doc.meta.width, H: doc.meta.height, furniture: g.clear });
+  if (g.clear) { doc.features = out.features; doc.meta.title = out.name; doc.settings.seed = g.seed % 100000; }
+  else for (const f of out.features) S.insertFeature(f);
+  app.genOutline = null;
+  app.sel = null;
+  S.commit();
+  fitView();
+  toast(`Generated ${out.name}: ${out.features.length} features, all editable. Ctrl+Z undoes it.`);
+}
+
+function renderGenerate(body) {
+  const g = app.gen, ol = app.genOutline;
+  const city = collapsible(body, 'City from an outline', { key: 'gen-city' });
+  city.append(el('p', { class: 'info' }, 'Sketch an outline (or use a random shape), choose the options, and a complete, editable city is built inside it: wall, districts, roads, plazas, buildings, river and farmland.'));
+  city.append(el('div', { class: 'outline-box' },
+    el('div', { class: 'obx-status' + (ol ? ' ok' : '') }, ol ? `✓ Outline ready (${ol.length} points)` : 'No outline yet — a random shape will be used'),
+    el('div', { class: 'btnrow wrap' },
+      el('button', { onclick: () => { setTool('outline'); toast('Drag to sketch the outline, then double-click to finish.'); } }, '✏ Draw outline'),
+      el('button', { title: 'Use the shape of the selected district, wall, lake or other closed area', onclick: useSelectedAsOutline }, '◰ Use selected area'),
+      ol ? el('button', { onclick: () => { app.genOutline = null; renderPanel(); requestRender(); } }, '✕ Clear') : null)));
+  buildForm(city, [
+    { k: 'districts', label: 'Districts', t: 'range', min: 1, max: 16, step: 1 },
+    { k: 'splitMode', label: 'Arrangement', t: 'select', options: [['center', 'Core with rings around it'], ['even', 'Spread evenly']] },
+    { k: 'density', label: 'Block density', t: 'select', options: [['edge', 'Tighter toward the edge'], ['center', 'Tighter toward the center'], ['none', 'Even']] },
+    { k: 'walled', label: 'City wall with gates', t: 'check' },
+    { k: 'gates', label: 'Main roads', t: 'range', min: 2, max: 12, step: 1 },
+    { k: 'ring', label: 'Ring road', t: 'check' },
+    { k: 'river', label: 'River', t: 'select', options: [['through', 'Through the city'], ['edge', 'Along one side'], ['none', 'None']] },
+    { k: 'farmland', label: 'Farmland outside', t: 'check' },
+    { k: 'halls', label: 'Large buildings', t: 'range', min: 0, max: 20, step: 1 },
+    { k: 'size', label: 'Size (random shape)', t: 'range', min: 250, max: 1100, step: 10, show: () => !app.genOutline },
+    { k: 'seed', label: 'Seed', t: 'seed' },
+    { k: 'clear', label: 'Replace everything on the map', t: 'check', rebuild: true },
+  ], g, { onInput() {}, onCommit() {}, rebuild: () => renderPanel() });
+  city.append(el('button', { class: 'primary wide', onclick: runGenerate }, '✨ Generate city'));
+  if (!g.clear) city.append(el('p', { class: 'info' }, 'The new city will be added to what is already on the map.'));
+
+  const kits = collapsible(body, 'Kits: ready-made groups', { key: 'gen-kits', collapsed: true });
+  kits.append(el('p', { class: 'info' }, 'Place a whole group at once: pick a kit, set its size, press Place, then click the map. The pieces arrive selected together so you can drag them into position as one.'));
   for (const kit of KITS) {
     const st = app.kitState[kit.id];
-    const card = el('div', { class: 'kit' }, el('h4', {}, kit.name), el('p', { class: 'info' }, kit.desc));
-    buildForm(card, kit.params.map((p) => ({ k: p.k, label: p.label, t: p.t, min: p.min, max: p.max, step: p.step })), st,
-      { onInput() {}, onCommit() {}, rebuild: () => {} });
-    card.append(el('button', {
+    const ks = collapsible(kits, kit.name, { key: 'kit-' + kit.id, collapsed: true });
+    ks.append(el('p', { class: 'info' }, kit.desc));
+    buildForm(ks, kit.params.map((p) => ({ k: p.k, label: p.label, t: p.t, min: p.min, max: p.max, step: p.step })), st, { onInput() {}, onCommit() {}, rebuild: () => {} });
+    ks.append(el('button', {
       class: 'primary wide',
       onclick: () => { app.kit = { def: kit, params: { ...st } }; setTool('kit'); toast(`Click on the map to place the ${kit.name.toLowerCase()}.`); },
     }, `Place ${kit.name.toLowerCase()}…`));
-    body.append(card);
   }
+}
+
+// Split a district into several, using the same method the city generator uses.
+function autoSplit(f, n, mode, vary, dense) {
+  const doc = S.getDoc();
+  if (f.type !== 'district') return;
+  const exact = !!(f.followWall || f.smooth);
+  let P = exact ? featureShape(f, doc) : f.points;
+  if (!P || P.length < 3) return;
+  if (exact) P = CG.simplifyClosed(P, 1);
+  const rng = makeRng(((f.seed >>> 0) + n * 977) >>> 0), c = G.centroid(P);
+  const cells = CG.voronoiSplit(P, CG.districtSeeds(c, P, n, rng, mode)).filter(Boolean);
+  if (cells.length < 2) { toast('That area is too small or too thin to split that many ways.'); return; }
+  const presets = vary ? CG.assignStyles(cells, c, P, rng) : null;
+  if (f.followWall) { if (!f.clipWall) f.clipWall = f.followWall; f.followWall = ''; }
+  if (exact) f.smooth = false;
+  const base = JSON.parse(JSON.stringify(f));
+  const radius = Math.max(...P.map((p) => G.dist(p, c)));
+  const ids = [];
+  cells.forEach((cell, i) => {
+    const d = i === 0 ? f : Object.assign(JSON.parse(JSON.stringify(base)), { id: S.newId(), seed: Math.floor(Math.random() * 1e9) });
+    d.points = cell; d.locked = false;
+    d.name = vary || !base.name ? CG.districtName(rng) : `${base.name} ${i + 1}`;
+    d.borderStreet = Math.max(+d.borderStreet || 0, 3.5);
+    d.labelSize = Math.round(Math.max(14, Math.min(54, Math.sqrt(Math.abs(G.polyArea(cell))) * 0.11)));
+    if (presets) {
+      const pr = { ...PRESETS[presets[i]] };
+      if (pr.pattern === 'radial') pr.pattern = 'organic';
+      Object.assign(d, pr, { preset: presets[i] });
+    }
+    if (dense && (d.look || 'blocks') === 'blocks') Object.assign(d, { gradMode: 'edge', gradStrength: 0.6, gradCenter: c.slice(), gradRadius: radius });
+    if (i > 0) doc.features.splice(doc.features.indexOf(f) + i, 0, d);
+    ids.push(d.id);
+  });
+  setMulti(ids);
+  S.commit();
+  toast(`Split into ${cells.length} districts, all selected. Pick any one to restyle it.`);
+}
+
+function buildAutoSplit(target, f) {
+  const sp = app.split;
+  const n = el('input', { type: 'number', min: 2, max: 16, step: 1, value: sp.n });
+  n.addEventListener('input', () => { sp.n = Math.max(2, Math.min(16, parseInt(n.value, 10) || 2)); });
+  const mode = el('select', {}, el('option', { value: 'center', selected: sp.mode === 'center' }, 'Core with rings'), el('option', { value: 'even', selected: sp.mode === 'even' }, 'Spread evenly'));
+  mode.addEventListener('change', () => { sp.mode = mode.value; });
+  const mk = (key, text) => { const cb = el('input', { type: 'checkbox', checked: !!sp[key] }); cb.addEventListener('change', () => { sp[key] = cb.checked; }); return el('label', { class: 'mrow' }, cb, ' ' + text); };
+  target.append(el('div', { class: 'autosplit' },
+    el('div', { class: 'astitle' }, '⚙ Split into districts automatically'),
+    el('div', { class: 'asrow' }, el('span', {}, 'Districts'), n, mode),
+    mk('vary', 'Give each its own style'),
+    mk('dense', 'Tighter blocks toward the edge'),
+    el('button', { type: 'button', class: 'wide primary', onclick: () => autoSplit(f, sp.n, sp.mode, sp.vary, sp.dense) }, 'Split automatically')));
 }
 
 function renderLayers(body) {
@@ -1011,19 +1207,22 @@ function renderLayers(body) {
 function renderMapSettings(body) {
   const doc = S.getDoc();
   const h = { onInput: () => S.touch(), onCommit: () => S.commit('panel'), rebuild: () => renderPanel(), defaults: colorDefault };
-  body.append(el('div', { class: 'heading' }, 'Map'));
-  buildForm(body, [
+  const page = collapsible(body, 'Page', { key: 'map-page' });
+  buildForm(page, [
     { k: 'title', label: 'File name', t: 'text' },
     { k: 'width', label: 'Page width', t: 'number', min: 300, max: 10000, step: 10 },
     { k: 'height', label: 'Page height', t: 'number', min: 300, max: 10000, step: 10 },
   ], doc.meta, h);
   const fontOpts = FONTS.map((f) => [f, f]);
-  buildForm(body, [
+  const theme = collapsible(body, 'Theme & fonts', { key: 'map-theme' });
+  buildForm(theme, [
     { k: 'theme', label: 'Theme', t: 'select', options: Object.entries(THEMES).map(([k, v]) => [k, v.name]), rebuild: true, onChange: (s) => { s.colors = {}; } },
     { k: 'fontLabel', label: 'Label font', t: 'select', options: fontOpts },
     { k: 'fontTitle', label: 'Title font', t: 'select', options: fontOpts },
     { k: 'fontScript', label: 'Script font', t: 'select', options: fontOpts },
-    { t: 'heading', label: 'Decoration' },
+  ], doc.settings, h);
+  const deco = collapsible(body, 'Decoration', { key: 'map-deco', collapsed: true });
+  buildForm(deco, [
     { k: 'frame', label: 'Border', t: 'check' },
     { k: 'frameStyle', label: 'Border style', t: 'select', options: [['solid', 'Solid'], ['ornate', 'Ornate (ladder)']] },
     { k: 'frameWidth', label: 'Border width', t: 'range', min: 4, max: 120, step: 1 },
@@ -1038,18 +1237,18 @@ function renderMapSettings(body) {
     { k: 'glow', label: 'District glow', t: 'check' },
     { k: 'glowSize', label: 'Glow size', t: 'range', min: 5, max: 150, step: 1 },
   ], doc.settings, h);
-  body.append(el('div', { class: 'heading' }, 'Colors'),
-    el('p', { class: 'info' }, '× resets a color to the theme default.'));
-  buildForm(body, COLOR_KEYS.map(([k, l]) => ({ k, label: l, t: 'color' })), doc.settings.colors, h);
+  const colors = collapsible(body, 'Colors', { key: 'map-colors', collapsed: true });
+  colors.append(el('p', { class: 'info' }, '× resets a color to the theme default.'));
+  buildForm(colors, COLOR_KEYS.map(([k, l]) => ({ k, label: l, t: 'color' })), doc.settings.colors, h);
 
-  body.append(el('div', { class: 'heading' }, 'Tracing image'),
-    el('p', { class: 'info' }, 'Load a sketch or reference map to trace over. It is shown only in the editor, never exported, and stays in this browser only.'));
+  const tracing = collapsible(body, 'Tracing image', { key: 'map-trace', collapsed: true });
+  tracing.append(el('p', { class: 'info' }, 'Load a sketch or reference map to trace over. It is shown only in the editor, never exported, and stays in this browser only.'));
   const row = el('div', { class: 'btnrow' },
     el('button', { onclick: () => $('#fileRef').click() }, ref.img ? 'Replace image…' : 'Load image…'));
   if (ref.img) row.append(el('button', { onclick: () => { ref.img = null; ref.src = null; saveRef(); renderPanel(); requestRender(); } }, 'Remove'));
-  body.append(row);
+  tracing.append(row);
   if (ref.img) {
-    buildForm(body, [
+    buildForm(tracing, [
       { k: 'visible', label: 'Visible', t: 'check' },
       { k: 'opacity', label: 'Opacity', t: 'range', min: 0.05, max: 1, step: 0.05 },
       { k: 'scale', label: 'Scale', t: 'range', min: 0.05, max: 10, step: 0.01 },
@@ -1072,8 +1271,8 @@ function download(blob, name) {
 }
 function saveJSON() { download(new Blob([JSON.stringify(S.getDoc(), null, 1)], { type: 'application/json' }), slug() + '.city.json'); }
 
-function exportPNG() {
-  const doc = S.getDoc(), k = parseFloat($('#exportScale').value) || 2;
+function exportPNG(scale) {
+  const doc = S.getDoc(), k = scale || app.exportScale || 2;
   const c = document.createElement('canvas');
   c.width = Math.round(doc.meta.width * k); c.height = Math.round(doc.meta.height * k);
   const g = c.getContext('2d');
@@ -1187,22 +1386,41 @@ function replaceDoc(next) {
   S.commit();
   fitView();
 }
-$('#btnNewRandom').addEventListener('click', () => {
-  if (!confirm('Replace the current map with a new random city? (Ctrl+Z undoes this.)')) return;
-  replaceDoc(randomCity(Math.floor(Math.random() * 1e9)));
-});
-$('#btnNewBlank').addEventListener('click', () => {
+function newBlank() {
   if (!confirm('Start a blank map? (Ctrl+Z undoes this.)')) return;
   replaceDoc(S.blankDoc());
-});
-$('#btnOpen').addEventListener('click', () => $('#fileOpen').click());
-$('#btnSave').addEventListener('click', saveJSON);
-$('#btnExport').addEventListener('click', exportPNG);
+}
+function newRandom() {
+  if (!confirm('Replace the current map with a new random city? (Ctrl+Z undoes this.)')) return;
+  replaceDoc(CG.randomCityDoc());
+}
+function openGenerate() { app.tab = 'gen'; renderPanel(); }
+
+function openFileMenu(anchor) {
+  const r = anchor.getBoundingClientRect();
+  const exp = (k, text) => ({ label: text, onClick: () => { app.exportScale = k; exportPNG(k); } });
+  showMenu({ x: r.left, y: r.bottom + 6 }, [
+    { label: 'Generate a city…', hint: 'outline wizard', onClick: openGenerate },
+    { label: 'New random city', onClick: newRandom },
+    { label: 'New blank map', onClick: newBlank },
+    { sep: true },
+    { label: 'Open…', onClick: () => $('#fileOpen').click() },
+    { label: 'Save map file', hint: 'Ctrl+S', onClick: saveJSON },
+    { sep: true },
+    { head: 'Export PNG' },
+    exp(1, 'Small (1×)'), exp(2, 'Standard (2×)'), exp(3, 'Large (3×)'),
+    { sep: true },
+    { label: 'Keyboard shortcuts', hint: '?', onClick: () => toggleHelp(true) },
+  ], 'file');
+}
+$('#btnFile').addEventListener('click', (e) => openFileMenu(e.currentTarget));
+$('#btnGenerate').addEventListener('click', openGenerate);
+$('#btnExport').addEventListener('click', () => exportPNG(app.exportScale));
 $('#btnUndo').addEventListener('click', () => S.undo());
 $('#btnRedo').addEventListener('click', () => S.redo());
 $('#btnFit').addEventListener('click', fitView);
-$('#btnHelp').addEventListener('click', () => toggleHelp(true));
 $('#help').addEventListener('click', (e) => { if (e.target.id === 'help' || e.target.closest('.close')) toggleHelp(false); });
+
 
 function updateStatus() {
   const t = toolById(app.tool);
@@ -1227,7 +1445,7 @@ syncSnapButton();
 new ResizeObserver(resize).observe($('#stage'));
 renderTools();
 const saved = S.loadSaved();
-S.setDoc(saved && Array.isArray(saved.features) ? saved : randomCity(Math.floor(Math.random() * 1e9)));
+S.setDoc(saved && Array.isArray(saved.features) ? saved : CG.randomCityDoc());
 try {
   const r = JSON.parse(localStorage.getItem('citybuilder.ref') || 'null');
   if (r && r.src) { Object.assign(ref, r, { img: null }); loadRefImage(r.src); }

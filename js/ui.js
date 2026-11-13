@@ -20,19 +20,25 @@ export const SCHEMAS = {
   ],
   district: [
     label('name'),
-    { k: 'showLabel', label: 'Show label', t: 'check' },
-    { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 160, step: 1 },
-    { k: 'labelAngle', label: 'Label angle', t: 'range', min: -90, max: 90, step: 1 },
-    { k: 'labelSpacing', label: 'Letter spacing', t: 'range', min: 0, max: 1.5, step: 0.05 },
-    { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
-    { t: 'heading', label: 'Streets' },
+    { t: 'heading', label: 'Style' },
     { k: 'preset', label: 'Style preset', t: 'select', options: opts(PRESET_LABELS), rebuild: true,
       onChange: (f) => Object.assign(f, PRESETS[f.preset]) },
-    { k: 'look', label: 'Look', t: 'select', options: [['blocks', 'Buildings (blocks)'], ['garden', 'Park / garden (trees)'], ['cemetery', 'Cemetery (headstones)']], rebuild: true },
-    { k: 'pattern', label: 'Pattern', t: 'select', options: [['organic', 'Organic'], ['radial', 'Radial / rings'], ['grid', 'Grid']], rebuild: true },
-    { k: 'gridAngle', label: 'Grid angle', t: 'range', min: 0, max: 180, step: 1, show: (f) => f.pattern === 'grid' },
+    { k: 'tone', label: 'Tone', t: 'select', options: [['normal', 'Normal'], ['dark', 'Dark (slums, industry)'], ['light', 'Light (wealthy)'], ['park', 'Park']], show: (f) => (f.look || 'blocks') === 'blocks' },
+    { k: 'color', label: 'Custom fill', t: 'color' },
+    { k: 'hatch', label: 'Hatching', t: 'check', show: (f) => (f.look || 'blocks') === 'blocks' },
+    { k: 'borderStreet', label: 'Border street', t: 'range', min: 0, max: 20, step: 0.5 },
+    { t: 'heading', label: 'Streets' },
     { k: 'blockSize', label: 'Block size', t: 'range', min: 8, max: 400, step: 1 },
     { k: 'streetWidth', label: 'Street width', t: 'range', min: 0.5, max: 14, step: 0.1 },
+    { k: 'pattern', label: 'Pattern', t: 'select', options: [['organic', 'Organic'], ['radial', 'Radial / rings'], ['grid', 'Grid']], rebuild: true },
+    { k: 'gridAngle', label: 'Grid angle', t: 'range', min: 0, max: 180, step: 1, show: (f) => f.pattern === 'grid' },
+    { k: 'seed', label: 'Layout seed', t: 'seed' },
+    { t: 'heading', label: 'Density' },
+    { k: 'gradMode', label: 'Block density', t: 'select', rebuild: true, options: [['none', 'Even'], ['edge', 'Tighter toward the edge'], ['center', 'Tighter toward the center']] },
+    { k: 'gradStrength', label: 'Strength', t: 'range', min: 0, max: 1.5, step: 0.05, show: (f) => (f.gradMode || 'none') !== 'none' },
+    { t: 'info', text: 'Blocks get smaller where the city is denser. The gradient is measured from the middle of this district unless it was generated with a city, which shares one center.', show: (f) => (f.gradMode || 'none') !== 'none' },
+    { t: 'heading', label: 'More street options', collapsed: true },
+    { k: 'look', label: 'Look', t: 'select', options: [['blocks', 'Buildings (blocks)'], ['garden', 'Park / garden (trees)'], ['cemetery', 'Cemetery (headstones)']], rebuild: true },
     { k: 'irregularity', label: 'Irregularity', t: 'range', min: 0, max: 1, step: 0.01 },
     { k: 'warp', label: 'Curviness', t: 'range', min: 0, max: 40, step: 0.5 },
     { k: 'lots', label: 'Building lots', t: 'check' },
@@ -41,24 +47,26 @@ export const SCHEMAS = {
     { k: 'treeSpacing', label: 'Tree spacing', t: 'range', min: 7, max: 40, step: 0.5, show: (f) => f.look === 'garden' },
     { k: 'treeDensity', label: 'Tree density', t: 'range', min: 0, max: 1, step: 0.01, show: (f) => f.look === 'garden' },
     { k: 'graveSpacing', label: 'Headstone spacing', t: 'range', min: 5, max: 24, step: 0.5, show: (f) => f.look === 'cemetery' },
-    { k: 'seed', label: 'Layout seed', t: 'seed' },
-    { t: 'heading', label: 'Look' },
-    { k: 'tone', label: 'Tone', t: 'select', options: [['normal', 'Normal'], ['dark', 'Dark (slums, industry)'], ['light', 'Light (wealthy)'], ['park', 'Park']] },
-    { k: 'color', label: 'Custom fill', t: 'color' },
-    { k: 'hatch', label: 'Hatching', t: 'check' },
-    { k: 'borderStreet', label: 'Border street', t: 'range', min: 0, max: 20, step: 0.5 },
-    { t: 'heading', label: 'Shape' },
+    { t: 'heading', label: 'Label', collapsed: true },
+    { k: 'showLabel', label: 'Show label', t: 'check' },
+    { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 160, step: 1 },
+    { k: 'labelAngle', label: 'Label angle', t: 'range', min: -90, max: 90, step: 1 },
+    { k: 'labelSpacing', label: 'Letter spacing', t: 'range', min: 0, max: 1.5, step: 0.05 },
+    { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
+    { t: 'heading', label: 'Shape', collapsed: true },
     { k: 'followWall', label: 'Shape follows', t: 'select', rebuild: true, options: (f, ctx) => [['', 'Its own outline'], ...ctx.wallOptions()],
       onChange: (f, ctx, prev) => ctx.unlinkWall(f, prev) },
     { k: 'clipWall', label: 'Clip to wall', t: 'select', options: (f, ctx) => [['', 'Off'], ['all', 'Inside any wall'], ...ctx.wallOptions()] },
     { k: 'smooth', label: 'Smooth edges', t: 'check', show: (f) => !f.followWall },
     { t: 'heading', label: 'Tools' },
+    { t: 'custom', render: (target, f, h) => h.ctx.autoSplitUI(target, f) },
     { t: 'button', label: '✂ Split with a line', help: 'Draw a line across this district to break it into two.', action: (f, ctx) => ctx.startSplit(f) },
     { t: 'button', label: '🏰 Create wall around it', help: 'Adds a wall that traces this outline exactly and clips the district to it.', action: (f, ctx) => ctx.wallFromArea(f) },
     { t: 'button', label: '🏰 Wall only free edges', help: 'Adds wall segments along the borders that do not touch another district.', action: (f, ctx) => ctx.wallFromFreeEdges(f) },
   ],
   farm: [
     label('name'),
+    { t: 'heading', label: 'Label', collapsed: true },
     { k: 'showLabel', label: 'Show label', t: 'check' },
     { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 160, step: 1 },
     { k: 'labelAngle', label: 'Label angle', t: 'range', min: -90, max: 90, step: 1 },
@@ -80,22 +88,26 @@ export const SCHEMAS = {
   ],
   water: [
     label('name'),
+    { t: 'heading', label: 'Label', collapsed: true },
     { k: 'showLabel', label: 'Show label', t: 'check' },
     { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 160, step: 1 },
     { k: 'labelAngle', label: 'Label angle', t: 'range', min: -90, max: 90, step: 1 },
     { k: 'labelSpacing', label: 'Letter spacing', t: 'range', min: 0, max: 1.5, step: 0.05 },
     { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
+    { t: 'heading', label: 'Water' },
     { k: 'coastLines', label: 'Coast lines', t: 'range', min: 0, max: 8, step: 1 },
     { k: 'smooth', label: 'Smooth shore', t: 'check' },
   ],
   river: [
     label('name'),
+    { t: 'heading', label: 'Label', collapsed: true },
     { k: 'showLabel', label: 'Show label', t: 'check' },
     { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 120, step: 1 },
     { k: 'labelSpacing', label: 'Letter spacing', t: 'range', min: 0, max: 3, step: 0.05 },
     { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { k: 'labelOpacity', label: 'Label opacity', t: 'range', min: 0.15, max: 1, step: 0.05 },
     { k: 'labelPos', label: 'Label position', t: 'range', min: 0, max: 1, step: 0.005 },
+    { t: 'heading', label: 'River' },
     { k: 'width', label: 'Width', t: 'range', min: 3, max: 250, step: 1 },
     { k: 'wobble', label: 'Bank wobble', t: 'range', min: 0, max: 0.6, step: 0.01, show: (f) => !f.canal },
     { k: 'canal', label: 'Canal (stone-lined)', t: 'check', rebuild: true },
@@ -177,12 +189,36 @@ const el = (tag, attrs = {}, ...kids) => {
 };
 export { el };
 
+// Collapsible section: a clickable heading plus a body you append to. Open/closed state is remembered.
+const SECTION_KEY = 'citybuilder.sections';
+let sectionState = {};
+try { sectionState = JSON.parse(localStorage.getItem(SECTION_KEY) || '{}'); } catch (e) { sectionState = {}; }
+
+export function collapsible(container, title, o = {}) {
+  const key = o.key || title;
+  const closed = key in sectionState ? sectionState[key] : !!o.collapsed;
+  const chev = el('span', { class: 'chev' }, closed ? '▸' : '▾');
+  const head = el('div', { class: 'heading collapsible' }, chev, ' ' + title);
+  const body = el('div', { class: 'sec' + (closed ? ' hidden' : '') });
+  head.addEventListener('click', () => {
+    const nowClosed = !body.classList.contains('hidden');
+    body.classList.toggle('hidden', nowClosed);
+    chev.textContent = nowClosed ? '▸' : '▾';
+    sectionState[key] = nowClosed;
+    try { localStorage.setItem(SECTION_KEY, JSON.stringify(sectionState)); } catch (e) { /* ignore */ }
+  });
+  container.append(head, body);
+  return body;
+}
+
 // fields: schema; obj: object being edited; h: { onInput, onCommit, rebuild, ctx, defaults }
 export function buildForm(container, fields, obj, h) {
+  let target = container;
   for (const fd of fields) {
     if (fd.show && !fd.show(obj)) continue;
-    if (fd.t === 'heading') { container.append(el('div', { class: 'heading' }, fd.label)); continue; }
-    if (fd.t === 'info') { container.append(el('p', { class: 'info' }, fd.text)); continue; }
+    if (fd.t === 'heading') { target = collapsible(container, fd.label, { collapsed: fd.collapsed }); continue; }
+    if (fd.t === 'info') { target.append(el('p', { class: 'info' }, fd.text)); continue; }
+    if (fd.t === 'custom') { fd.render(target, obj, h); continue; }
     const row = el('label', { class: 'field' + (fd.t === 'check' ? ' check' : '') });
     row.append(el('span', {}, fd.label));
     const after = () => { if (fd.onChange) fd.onChange(obj, h.ctx); h.onCommit(); if (fd.rebuild) h.rebuild(); };
@@ -246,7 +282,7 @@ export function buildForm(container, fields, obj, h) {
       case 'button': {
         const b = el('button', { type: 'button', class: 'wide', title: fd.help || '' }, fd.label);
         b.addEventListener('click', (e) => { e.preventDefault(); fd.action(obj, h.ctx); });
-        container.append(b);
+        target.append(b);
         continue;
       }
       case 'check': {
@@ -281,6 +317,6 @@ export function buildForm(container, fields, obj, h) {
       default: break;
     }
     if (input) row.append(input);
-    container.append(row);
+    target.append(row);
   }
 }
