@@ -17,9 +17,9 @@ export function getColors(doc) {
   return c;
 }
 
-const CLOSED = { district: 1, farm: 1, water: 1, building: 1 };
+const CLOSED = { district: 1, farm: 1, water: 1, building: 1, cutout: 1 };
 const POINT_TYPES = { plaza: 1, landmark: 1, label: 1, compass: 1 };
-const CARVERS = { road: 1, plaza: 1, river: 1, water: 1, wall: 1, building: 1 };
+const CARVERS = { road: 1, plaza: 1, river: 1, water: 1, wall: 1, building: 1, cutout: 1 };
 export const isClosed = (f) => (f.type === 'wall' ? f.closed !== false : !!CLOSED[f.type] || (f.type === 'road' && !!f.closed));
 export const isPointType = (f) => !!POINT_TYPES[f.type];
 
@@ -185,6 +185,7 @@ export function drawText(ctx, text, x, y, o) {
 
 function drawTextOnPath(ctx, pts, text, o) {
   if (!text || pts.length < 2) return null;
+  const alpha = o.alpha == null ? 1 : o.alpha;
   let path = pts, cum = G.cumLengths(path), pos = o.pos;
   const L = cum[cum.length - 1];
   if (G.pointAt(path, cum, L * pos).dir[0] < 0) { path = pts.slice().reverse(); cum = G.cumLengths(path); pos = 1 - pos; }
@@ -199,6 +200,7 @@ function drawTextOnPath(ctx, pts, text, o) {
   const placed = [];
   let s = s0;
   chars.forEach((ch, i) => { placed.push({ ch, at: G.pointAt(path, cum, s + ws[i] / 2) }); s += ws[i] + sp; });
+  ctx.globalAlpha = alpha;
   for (const pass of o.halo ? ['h', 'f'] : ['f']) {
     if (pass === 'h') { ctx.strokeStyle = o.halo; ctx.lineWidth = o.haloW; ctx.lineJoin = 'round'; } else ctx.fillStyle = o.fill;
     for (const { ch, at } of placed) {
@@ -282,12 +284,73 @@ export function wallTowers(w, sh) {
 }
 
 // ---------- feature painters ----------
+// Irregular water texture: scattered short ripple strokes that clump and thin out with
+// distance from the shore, plus broken, wavering lines that follow the coast. Generated
+// once per lake shape and cached (it is rebuilt only when the shape changes).
+const lakeCache = new Map();
+function lakeTexture(f, sh) {
+  const key = f.id + '|' + sh.length + '|' + Math.round(G.polyArea(sh)) + '|' + Math.round(sh[0][0]) + ',' + Math.round(sh[0][1]);
+  if (lakeCache.has(key)) return lakeCache.get(key);
+  if (lakeCache.size > 40) lakeCache.clear();
+  const seed = hashStr(f.id);
+  const rnd = mulberry32(seed ^ 0x1a4e), nz = makeNoise(seed ^ 0x99);
+  const bb = G.bbox(sh), area = Math.abs(G.polyArea(sh));
+  const want = Math.min(2600, Math.round(area / 380));
+  const tiers = [[], [], []];
+  let placed = 0, tries = 0;
+  while (placed < want && tries < want * 8) {
+    tries++;
+    const p = [bb.x0 + rnd() * (bb.x1 - bb.x0), bb.y0 + rnd() * (bb.y1 - bb.y0)];
+    if (!G.pointInPoly(p, sh)) continue;
+    const d = G.nearestOnPath(p, sh, true).d;
+    const clump = 0.35 + 0.65 * ((nz(p[0] / 140, p[1] / 140) + 1) / 2);
+    if (rnd() > (0.2 + 0.8 * Math.exp(-d / 80)) * clump) continue;
+    const len = 5 + rnd() * rnd() * 36;
+    const ang = (rnd() - 0.5) * 0.3 + nz(p[0] / 260 + 5, p[1] / 260) * 0.45;
+    tiers[rnd() < 0.5 ? 0 : rnd() < 0.7 ? 1 : 2].push([p[0], p[1], len, ang]);
+    placed++;
+  }
+  // Coast-following lines, jittered and dashed irregularly.
+  const baseArea = G.polyArea(sh), shore = [];
+  [14, 27, 44, 66].forEach((d, k) => {
+    const off = G.inflatePoly(sh, -d);
+    const a = G.polyArea(off);
+    if (Math.sign(a) !== Math.sign(baseArea) || Math.abs(a) < Math.abs(baseArea) * 0.25) return;
+    const pts = off.map((p, i) => [p[0] + nz(i / 6, k * 4.1) * 2.4, p[1] + nz(i / 6 + 50, k * 4.1) * 2.4]);
+    const dash = [];
+    for (let i = 0; i < 6; i++) dash.push(i % 2 ? 6 + rnd() * 30 : 18 + rnd() * 70);
+    shore.push({ pts, dash, alpha: 0.6 - k * 0.12, offset: rnd() * 200 });
+  });
+  const out = { tiers, shore };
+  lakeCache.set(key, out);
+  return out;
+}
+
+function drawLakeTexture(ctx, f, sh, C) {
+  const t = lakeTexture(f, sh);
+  ctx.strokeStyle = C.waterLine;
+  ctx.lineCap = 'round';
+  [0.75, 0.5, 0.3].forEach((alpha, i) => {
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = i === 0 ? 1.2 : 0.9;
+    ctx.beginPath();
+    for (const [x, y, len, a] of t.tiers[i]) { ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len); }
+    ctx.stroke();
+  });
+  ctx.lineWidth = 1;
+  for (const s of t.shore) {
+    ctx.globalAlpha = s.alpha; ctx.setLineDash(s.dash); ctx.lineDashOffset = s.offset;
+    ctx.beginPath(); addPath(ctx, s.pts, true); ctx.stroke();
+  }
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
+
 function drawWater(ctx, f, sh, C, riverPolys) {
   ctx.save();
   ctx.beginPath(); addPath(ctx, sh, true);
   ctx.fillStyle = C.water; ctx.fill();
   ctx.clip();
-  ctx.globalAlpha = 0.45; ctx.fillStyle = ripplePattern(ctx, C.waterLine); ctx.fill(); ctx.globalAlpha = 1;
+  drawLakeTexture(ctx, f, sh, C);
   ctx.restore();
   // Shore rings and the edge line go on their own layer so rivers can open into the
   // lake: both are erased wherever a river's channel meets the shore.
@@ -407,35 +470,67 @@ function drawMonument(ctx, p, C, S) {
     }
     case 'tree':
       circle(ctx, c, r * 0.45); ctx.fillStyle = C.park; ctx.fill(); ctx.strokeStyle = C.outline; ctx.lineWidth = S.outline; ctx.stroke(); break;
+    case 'market': {
+      // Small stalls (squares and rectangles) laid out in loose rows across the plaza.
+      const rnd = mulberry32(hashStr(p.id));
+      const sq = p.shape === 'square';
+      const a = sq ? ((p.angle || 0) * Math.PI) / 180 : 0;
+      const hw = sq ? r * (p.aspect || 1) : r, hh = r;
+      const step = Math.max(6, r * 0.3);
+      const nx = Math.max(1, Math.floor((hw * 1.56) / step) + 1), ny = Math.max(1, Math.floor((hh * 1.56) / step) + 1);
+      ctx.fillStyle = C.block; ctx.strokeStyle = C.outline; ctx.lineWidth = Math.max(0.8, S.outline * 0.8);
+      for (let i = 0; i < nx; i++) {
+        for (let j = 0; j < ny; j++) {
+          const gx = (i - (nx - 1) / 2) * step, gy = (j - (ny - 1) / 2) * step;
+          if (!sq && Math.hypot(gx, gy) > r * 0.74) continue;
+          if (rnd() < 0.2) continue;
+          const horiz = rnd() < 0.5, w = step * (horiz ? 0.72 : 0.46), h = step * (horiz ? 0.46 : 0.72);
+          const rot = a + (sq ? 0 : (rnd() - 0.5) * 0.35);
+          const ctr = G.add(G.rotate([gx, gy], a), c);
+          const quad = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map((q) => G.add(G.rotate(q, rot), ctr));
+          ctx.beginPath(); addPath(ctx, quad, true); ctx.fill(); ctx.stroke();
+        }
+      }
+      break;
+    }
     default: break;
   }
 }
 
-function drawCompass(ctx, p, R, C, S) {
+// A classic faceted compass rose: thin double ring, short intercardinal points,
+// long cardinal points (north in the accent colour), each split into a dark and a light half.
+function drawCompass(ctx, f, C, S) {
+  const p = f.points[0], R = f.size, deg = f.angle || 0, ang = (deg * Math.PI) / 180;
+  const lw = Math.max(0.8, R * 0.016);
   ctx.save();
   ctx.translate(p[0], p[1]);
-  ctx.beginPath(); circle(ctx, [0, 0], R); ctx.fillStyle = C.frame; ctx.fill();
-  ctx.beginPath(); circle(ctx, [0, 0], R * 0.8); ctx.fillStyle = C.paper; ctx.fill();
-  ctx.strokeStyle = C.paper; ctx.lineWidth = R * 0.022;
-  for (let i = 0; i < 72; i++) {
-    const a = (i / 72) * Math.PI * 2;
-    ctx.beginPath(); ctx.moveTo(Math.cos(a) * R * 0.84, Math.sin(a) * R * 0.84);
-    ctx.lineTo(Math.cos(a) * R * 0.96, Math.sin(a) * R * 0.96); ctx.stroke();
-  }
-  ctx.strokeStyle = C.frame; ctx.lineWidth = R * 0.018;
-  ctx.beginPath(); circle(ctx, [0, 0], R * 0.6); ctx.stroke();
-  ctx.beginPath(); circle(ctx, [0, 0], R * 0.22); ctx.stroke();
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * R * 0.6, Math.sin(a) * R * 0.6); ctx.stroke();
-    ctx.beginPath(); circle(ctx, [Math.cos(a) * R * 0.7, Math.sin(a) * R * 0.7], R * 0.045);
-    ctx.fillStyle = C.accent; ctx.fill();
-  }
-  ctx.beginPath();
-  ctx.moveTo(0, -R * 0.58); ctx.lineTo(R * 0.08, -R * 0.24); ctx.lineTo(-R * 0.08, -R * 0.24); ctx.closePath();
-  ctx.fillStyle = C.accent; ctx.fill();
+  ctx.rotate(ang);
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = C.frame;
+  ctx.lineWidth = lw * 1.8;
+  ctx.beginPath(); circle(ctx, [0, 0], R * 0.64); ctx.stroke();
+  ctx.lineWidth = lw * 0.7;
+  ctx.beginPath(); circle(ctx, [0, 0], R * 0.58); ctx.stroke();
+  const star = (len, wid, base, darkOf) => {
+    for (let i = 0; i < 4; i++) {
+      const a = base + (i * Math.PI) / 2;
+      const tip = [Math.cos(a) * len, Math.sin(a) * len];
+      const s1 = [Math.cos(a - Math.PI / 4) * wid, Math.sin(a - Math.PI / 4) * wid];
+      const s2 = [Math.cos(a + Math.PI / 4) * wid, Math.sin(a + Math.PI / 4) * wid];
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(s1[0], s1[1]); ctx.lineTo(tip[0], tip[1]); ctx.closePath();
+      ctx.fillStyle = darkOf(i); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(tip[0], tip[1]); ctx.lineTo(s2[0], s2[1]); ctx.closePath();
+      ctx.fillStyle = C.paper; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(s1[0], s1[1]); ctx.lineTo(tip[0], tip[1]); ctx.lineTo(s2[0], s2[1]); ctx.lineTo(0, 0); ctx.closePath();
+      ctx.lineWidth = lw; ctx.stroke();
+    }
+  };
+  star(R * 0.5, R * 0.12, -Math.PI / 4, () => C.frame);
+  star(R, R * 0.17, -Math.PI / 2, (i) => (i === 0 ? C.accent : C.frame));
+  ctx.beginPath(); circle(ctx, [0, 0], R * 0.045); ctx.fillStyle = C.frame; ctx.fill();
   ctx.restore();
-  drawText(ctx, 'N', p[0], p[1] - R * 1.18, { size: R * 0.24, family: S.fontTitle, fill: C.frame, halo: C.paper, haloW: R * 0.05 });
+  const np = G.add(p, G.rotate([0, -R * 1.22], ang));
+  drawText(ctx, 'N', np[0], np[1], { size: R * 0.28, angle: deg, family: S.fontTitle, fill: C.frame, halo: C.paper, haloW: R * 0.07 });
 }
 
 function drawFrame(ctx, W, H, C, S) {
@@ -480,6 +575,7 @@ export function renderMap(ctx, doc, o) {
   const center = walls.length ? G.centroid(shape.get(walls[0].id)) : [W / 2, H / 2];
   const ow = S.outline, gap = +S.featureGap || 0;
   const haloK = S.haloWidth == null ? 0.34 : +S.haloWidth;
+  const haloOf = (f) => (f.halo == null ? haloK : +f.halo);
 
   const clipWalls = (list) => (list.length ? (g) => { g.beginPath(); for (const w of list) addPath(g, shape.get(w.id), true); g.clip(); } : null);
   const allWallsClip = clipWalls(walls);
@@ -520,11 +616,12 @@ export function renderMap(ctx, doc, o) {
       } else if (f.type === 'river') {
         if (sh.length < 2) continue;
         g.beginPath(); addPath(g, riverGeo(f).poly, true); g.fill();
-        g.lineWidth = 2 * (gap + ex); g.stroke();
-      } else if (f.type === 'water' || f.type === 'building') {
+        if (gap + ex > 0) { g.lineWidth = 2 * (gap + ex); g.stroke(); }
+      } else if (f.type === 'water' || f.type === 'building' || f.type === 'cutout') {
         if (sh.length < 3) continue;
+        const gp = f.type === 'cutout' ? +f.gap || 0 : gap;
         g.beginPath(); addPath(g, sh, true); g.fill();
-        g.lineWidth = 2 * (gap + ex); g.stroke();
+        if (gp + ex > 0) { g.lineWidth = 2 * (gp + ex); g.stroke(); }
       } else if (f.type === 'wall') {
         if (sh.length < (f.closed === false ? 2 : 3)) continue;
         g.beginPath(); addPath(g, sh, f.closed !== false);
@@ -554,18 +651,27 @@ export function renderMap(ctx, doc, o) {
     // Outer edge outline (only its outside half survives), then the street-colored ground.
     for (const x of items) within(ctx, x, () => { ctx.beginPath(); addPath(ctx, x.sh, true); ctx.strokeStyle = C.outline; ctx.lineWidth = ow * 2; ctx.stroke(); });
     // One fill per wall-clip group, so neighbouring districts form a single shape with no hairline between them.
+    // Cut-aways above the districts are erased from it so the hole really is open.
+    const carvers = above.filter((f) => CARVERS[f.type]);
+    const cutouts = carvers.filter((f) => f.type === 'cutout' && shape.get(f.id).length >= 3);
     const groups = new Map();
     for (const x of items) { const key = String(x.d.clipWall || ''); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(x); }
     for (const list of groups.values()) {
-      ctx.save();
-      if (list[0].clip) list[0].clip(ctx);
-      ctx.beginPath();
-      for (const x of list) addPath(ctx, x.cs, true);
-      ctx.fillStyle = C.street; ctx.fill();
-      ctx.restore();
+      const gg = getLayer(0, ctx);
+      gg.save();
+      if (list[0].clip) list[0].clip(gg);
+      gg.beginPath();
+      for (const x of list) addPath(gg, x.cs, true);
+      gg.fillStyle = C.street; gg.fill();
+      gg.restore();
+      if (cutouts.length) {
+        gg.globalCompositeOperation = 'destination-out'; gg.fillStyle = '#000';
+        for (const c of cutouts) { gg.beginPath(); addPath(gg, shape.get(c.id), true); gg.fill(); }
+        gg.globalCompositeOperation = 'source-over';
+      }
+      blit(ctx, gg);
     }
 
-    const carvers = above.filter((f) => CARVERS[f.type]);
     for (const ex of [0, ow]) {
       const block = ex > 0;
       const g = getLayer(0, ctx);
@@ -732,7 +838,11 @@ export function renderMap(ctx, doc, o) {
     for (const r of cityRoadsAll) {
       if (!r.gates) continue;
       for (const x of G.pathIntersections(shape.get(r.id), r.closed, sh, wClosed)) {
-        const L = w.width + w.towerSize * 2 + 4;
+        // The opening spans exactly the wall's thickness measured along the road, so the gate stub
+        // neither pokes out of the wall nor leaves a sliver of wall across the road, even when the road
+        // crosses at an angle.
+        const sinT = Math.max(0.35, Math.abs(x.dirA[0] * x.dirB[1] - x.dirA[1] * x.dirB[0]));
+        const L = (w.width / 2 + 1.5) / sinT;
         const a = G.sub(x.p, G.scale(x.dirA, L)), b = G.add(x.p, G.scale(x.dirA, L));
         ctx.lineCap = 'butt';
         for (const pass of [0, 1]) {
@@ -742,7 +852,7 @@ export function renderMap(ctx, doc, o) {
           ctx.stroke();
         }
         ctx.lineCap = 'round';
-        const ts = Math.max(3, w.towerSize * 1.3), off = r.width / 2 + ts * 0.9;
+        const ts = Math.max(4, w.width * 0.75, w.towerSize * 1.3), off = r.width / 2 / sinT + ts * 0.8;
         ctx.beginPath();
         circle(ctx, G.add(x.p, G.scale(x.dirB, off)), ts);
         circle(ctx, G.sub(x.p, G.scale(x.dirB, off)), ts);
@@ -758,12 +868,25 @@ export function renderMap(ctx, doc, o) {
       case 'farm': drawFarm(f, sh); break;
       case 'water': if (sh.length >= 3) drawWater(ctx, f, sh, C, riverPolys()); break;
       case 'river': if (sh.length >= 2) drawRiver(ctx, f, sh, riverGeo(f), C, lakeShapes); break;
-      case 'building':
+      case 'building': {
         if (sh.length < 3) break;
+        // "District blocks" style gives a building the same fill, hatching and line weight as the blocks around it.
+        const asBlock = f.style === 'district';
         ctx.beginPath(); addPath(ctx, sh, true);
-        ctx.fillStyle = { solid: C.outline, light: C.street, block: C.block, accent: C.accent, water: C.water, park: C.park }[f.style] || C.outline;
+        ctx.fillStyle = f.color || (asBlock ? toneColor(C, f.tone) : ({ solid: C.outline, light: C.street, block: C.block, accent: C.accent, water: C.water, park: C.park }[f.style] || C.outline));
         ctx.fill();
-        ctx.strokeStyle = C.outline; ctx.lineWidth = ow * 1.3; ctx.stroke();
+        if (asBlock && f.hatch && S.hatch && C.hatch) {
+          const a = Math.max(0, Math.min(1, (k - 0.35) / 0.8));
+          if (a > 0) { ctx.globalAlpha = a; ctx.fillStyle = hatchPattern(ctx, C.hatch, S.hatchSpacing); ctx.fill(); ctx.globalAlpha = 1; }
+        }
+        ctx.strokeStyle = C.outline; ctx.lineWidth = asBlock ? ow : ow * 1.3; ctx.stroke();
+        break;
+      }
+      case 'cutout':
+        if (sh.length < 3 || f.fill === 'none') break;
+        ctx.beginPath(); addPath(ctx, sh, true);
+        ctx.fillStyle = f.fill === 'park' ? C.park : C.street; ctx.fill();
+        ctx.strokeStyle = C.outline; ctx.lineWidth = ow; ctx.stroke();
         break;
       case 'wall': if (sh.length >= (f.closed === false ? 2 : 3)) drawWall(f); break;
       case 'landmark': {
@@ -775,7 +898,7 @@ export function renderMap(ctx, doc, o) {
         if (f.showLabel && f.name) {
           const p = G.add(c, f.labelOffset || [0, 0]);
           const poly = drawText(ctx, f.name, p[0], p[1], {
-            size: f.labelSize, spacing: 0.06, family: fam('fontLabel'), upper: true, fill: C.label, halo: C.labelHalo, haloW: f.labelSize * haloK,
+            size: f.labelSize, spacing: 0.06, family: fam('fontLabel'), upper: true, fill: C.label, halo: C.labelHalo, haloW: f.labelSize * haloOf(f),
           });
           if (poly) hits.push({ id: f.id, kind: 'offset', poly });
         }
@@ -787,13 +910,13 @@ export function renderMap(ctx, doc, o) {
         const st = LABEL_STYLES[f.style] || LABEL_STYLES.district;
         const poly = drawText(ctx, f.text, c[0], c[1], {
           size: f.size, angle: f.angle, spacing: f.spacing, family: fam(st.font), upper: st.upper, italic: st.italic,
-          fill: f.color || C[st.fill], halo: st.halo ? C[st.halo] : null, haloW: f.size * haloK,
+          fill: f.color || C[st.fill], halo: st.halo ? C[st.halo] : null, haloW: f.size * haloOf(f),
           boxed: st.boxed, boxFill: C.paper, boxStroke: C.frame,
         });
         if (poly) hits.push({ id: f.id, kind: 'move', poly });
         break;
       }
-      case 'compass': if (f.points[0]) drawCompass(ctx, f.points[0], f.size, C, S); break;
+      case 'compass': if (f.points[0]) drawCompass(ctx, f, C, S); break;
       default: break;
     }
   }
@@ -830,14 +953,14 @@ export function renderMap(ctx, doc, o) {
     const water = f.type === 'water';
     const poly = drawText(ctx, f.name, c[0], c[1], {
       size: f.labelSize, angle: f.labelAngle, spacing: f.labelSpacing, family: fam('fontLabel'), upper: true,
-      fill: water ? C.waterText : C.label, halo: water ? C.waterHalo : C.labelHalo, haloW: f.labelSize * haloK,
+      fill: water ? C.waterText : C.label, halo: water ? C.waterHalo : C.labelHalo, haloW: f.labelSize * haloOf(f),
     });
     if (poly) hits.push({ id: f.id, kind: 'offset', poly });
   }
   for (const f of feats) {
     if (f.type !== 'river' || !f.showLabel || !f.name) continue;
     const poly = drawTextOnPath(ctx, shape.get(f.id), f.name, {
-      pos: f.labelPos, size: f.labelSize, spacing: f.labelSpacing, family: fam('fontLabel'), fill: C.waterText, halo: C.waterHalo, haloW: f.labelSize * haloK,
+      pos: f.labelPos, size: f.labelSize, spacing: f.labelSpacing, family: fam('fontLabel'), fill: C.waterText, halo: C.waterHalo, haloW: f.labelSize * haloOf(f), alpha: f.labelOpacity == null ? 0.7 : f.labelOpacity,
     });
     if (poly) hits.push({ id: f.id, kind: 'pathpos', poly });
   }

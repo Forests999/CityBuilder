@@ -1,6 +1,7 @@
 // Property panels: a small schema-driven form builder.
 
 import { PRESETS, PRESET_LABELS } from './generate.js';
+import { BUILDING_SHAPES } from './shapes.js';
 import { LABEL_STYLES } from './render.js';
 
 const opts = (o) => Object.entries(o);
@@ -23,6 +24,7 @@ export const SCHEMAS = {
     { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 160, step: 1 },
     { k: 'labelAngle', label: 'Label angle', t: 'range', min: -90, max: 90, step: 1 },
     { k: 'labelSpacing', label: 'Letter spacing', t: 'range', min: 0, max: 1.5, step: 0.05 },
+    { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { t: 'heading', label: 'Streets' },
     { k: 'preset', label: 'Style preset', t: 'select', options: opts(PRESET_LABELS), rebuild: true,
       onChange: (f) => Object.assign(f, PRESETS[f.preset]) },
@@ -55,6 +57,7 @@ export const SCHEMAS = {
     { k: 'showLabel', label: 'Show label', t: 'check' },
     { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 160, step: 1 },
     { k: 'labelAngle', label: 'Label angle', t: 'range', min: -90, max: 90, step: 1 },
+    { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { t: 'heading', label: 'Fields' },
     { k: 'pattern', label: 'Pattern', t: 'select', options: [['organic', 'Organic'], ['radial', 'Radial'], ['grid', 'Grid (strip fields)']], rebuild: true },
     { k: 'gridAngle', label: 'Grid angle', t: 'range', min: 0, max: 180, step: 1, show: (f) => f.pattern === 'grid' },
@@ -76,6 +79,7 @@ export const SCHEMAS = {
     { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 160, step: 1 },
     { k: 'labelAngle', label: 'Label angle', t: 'range', min: -90, max: 90, step: 1 },
     { k: 'labelSpacing', label: 'Letter spacing', t: 'range', min: 0, max: 1.5, step: 0.05 },
+    { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { k: 'coastLines', label: 'Coast lines', t: 'range', min: 0, max: 8, step: 1 },
     { k: 'smooth', label: 'Smooth shore', t: 'check' },
   ],
@@ -84,6 +88,8 @@ export const SCHEMAS = {
     { k: 'showLabel', label: 'Show label', t: 'check' },
     { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 120, step: 1 },
     { k: 'labelSpacing', label: 'Letter spacing', t: 'range', min: 0, max: 3, step: 0.05 },
+    { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
+    { k: 'labelOpacity', label: 'Label opacity', t: 'range', min: 0.15, max: 1, step: 0.05 },
     { k: 'labelPos', label: 'Label position', t: 'range', min: 0, max: 1, step: 0.005 },
     { k: 'width', label: 'Width', t: 'range', min: 3, max: 250, step: 1 },
     { k: 'wobble', label: 'Bank wobble', t: 'range', min: 0, max: 0.6, step: 0.01, show: (f) => !f.canal },
@@ -105,11 +111,28 @@ export const SCHEMAS = {
     { k: 'radius', label: 'Radius / half-size', t: 'range', min: 3, max: 200, step: 1 },
     { k: 'aspect', label: 'Width ÷ height', t: 'range', min: 0.3, max: 3, step: 0.05, show: (f) => f.shape === 'square' },
     { k: 'angle', label: 'Rotation', t: 'range', min: -90, max: 90, step: 1, show: (f) => f.shape === 'square' },
-    { k: 'monument', label: 'Centerpiece', t: 'select', options: [['none', 'None'], ['dot', 'Statue (dot)'], ['ring', 'Ring'], ['fountain', 'Fountain'], ['obelisk', 'Obelisk'], ['tree', 'Tree / garden']] },
+    { k: 'monument', label: 'Centerpiece', t: 'select', options: [['none', 'None'], ['dot', 'Statue (dot)'], ['ring', 'Ring'], ['fountain', 'Fountain'], ['obelisk', 'Obelisk'], ['tree', 'Tree / garden'], ['market', 'Market stalls']] },
   ],
   building: [
     label('name'),
-    { k: 'style', label: 'Fill', t: 'select', options: [['solid', 'Solid ink'], ['light', 'Light (street color)'], ['block', 'Block color'], ['accent', 'Accent'], ['park', 'Park'], ['water', 'Water']] },
+    { t: 'heading', label: 'Shape' },
+    { k: 'shape', label: 'Shape preset', t: 'select', options: BUILDING_SHAPES, rebuild: true, onChange: (f, ctx) => ctx.reshapeBuilding(f) },
+    { k: 'size', label: 'Size', t: 'range', min: 4, max: 300, step: 1, live: true, show: (f) => f.shape !== 'free', onChange: (f, ctx) => ctx.reshapeBuilding(f) },
+    { k: 'aspect', label: 'Width ÷ height', t: 'range', min: 0.3, max: 4, step: 0.05, live: true, show: (f) => f.shape === 'rect', onChange: (f, ctx) => ctx.reshapeBuilding(f) },
+    { k: 'inner', label: 'Point depth', t: 'range', min: 0.15, max: 0.9, step: 0.01, live: true, show: (f) => /^star/.test(f.shape), onChange: (f, ctx) => ctx.reshapeBuilding(f) },
+    { k: 'angle', label: 'Rotation', t: 'range', min: -180, max: 180, step: 1, live: true, show: (f) => f.shape !== 'free', onChange: (f, ctx) => ctx.reshapeBuilding(f) },
+    { k: 'smooth', label: 'Smooth edges', t: 'check' },
+    { t: 'heading', label: 'Look' },
+    { k: 'style', label: 'Fill', t: 'select', rebuild: true, options: [['solid', 'Solid ink'], ['district', 'Like district blocks (fill, hatching, lines)'], ['light', 'Light (street color)'], ['block', 'Block color'], ['accent', 'Accent'], ['park', 'Park'], ['water', 'Water']] },
+    { k: 'tone', label: 'Block tone', t: 'select', options: [['normal', 'Normal'], ['dark', 'Dark'], ['light', 'Light'], ['park', 'Park']], show: (f) => f.style === 'district' },
+    { k: 'hatch', label: 'Hatching', t: 'check', show: (f) => f.style === 'district' },
+    { k: 'color', label: 'Custom fill', t: 'color' },
+  ],
+  cutout: [
+    label('name'),
+    { t: 'info', text: 'Removes this area from any district below it in the layer list: a hole, bay or notch cut out of the inside of a district. Move it above or below districts in Layers to choose what it cuts.' },
+    { k: 'fill', label: 'Inside shows', t: 'select', options: [['none', 'Whatever is underneath'], ['street', 'Open ground (street color)'], ['park', 'Park']] },
+    { k: 'gap', label: 'Gap around it', t: 'range', min: 0, max: 20, step: 0.5 },
     { k: 'smooth', label: 'Smooth edges', t: 'check' },
   ],
   landmark: [
@@ -117,6 +140,7 @@ export const SCHEMAS = {
     { k: 'showLabel', label: 'Show label', t: 'check' },
     { k: 'size', label: 'Dot size', t: 'range', min: 1, max: 30, step: 0.5 },
     { k: 'labelSize', label: 'Label size', t: 'range', min: 6, max: 80, step: 1 },
+    { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { t: 'info', text: 'Drag the label on the map to move it relative to the dot.' },
   ],
   label: [
@@ -125,10 +149,12 @@ export const SCHEMAS = {
     { k: 'size', label: 'Size', t: 'range', min: 6, max: 240, step: 1 },
     { k: 'angle', label: 'Angle', t: 'range', min: -180, max: 180, step: 1 },
     { k: 'spacing', label: 'Letter spacing', t: 'range', min: 0, max: 2, step: 0.02 },
+    { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { k: 'color', label: 'Custom color', t: 'color' },
   ],
   compass: [
     { k: 'size', label: 'Size', t: 'range', min: 20, max: 500, step: 1 },
+    { k: 'angle', label: 'Rotation', t: 'range', min: -180, max: 180, step: 1 },
   ],
 };
 
@@ -175,11 +201,25 @@ export function buildForm(container, fields, obj, h) {
         const wrap = el('div', { class: 'range' });
         const r = el('input', { type: 'range', min: fd.min, max: fd.max, step: fd.step || 1, value: obj[fd.k] });
         const num = el('input', { type: 'number', min: fd.min, max: fd.max, step: fd.step || 1, value: obj[fd.k] });
-        r.addEventListener('input', () => { obj[fd.k] = parseFloat(r.value); num.value = r.value; h.onInput(); });
+        r.addEventListener('input', () => { obj[fd.k] = parseFloat(r.value); num.value = r.value; if (fd.live && fd.onChange) fd.onChange(obj, h.ctx); h.onInput(); });
         r.addEventListener('change', after);
         num.addEventListener('input', () => { const v = parseFloat(num.value); if (!isNaN(v)) { obj[fd.k] = v; r.value = v; h.onInput(); } });
         num.addEventListener('change', after);
         wrap.append(r, num);
+        input = wrap;
+        break;
+      }
+      case 'optrange': {
+        // A value that can be left on the map-wide default (null) or overridden for this item.
+        const wrap = el('div', { class: 'optrange' });
+        const auto = el('input', { type: 'checkbox', checked: obj[fd.k] == null });
+        const fb = h.ctx && h.ctx.haloDefault ? h.ctx.haloDefault() : 0.34;
+        const r = el('input', { type: 'range', min: fd.min, max: fd.max, step: fd.step || 1, value: obj[fd.k] ?? fb });
+        r.disabled = obj[fd.k] == null;
+        auto.addEventListener('change', () => { r.disabled = auto.checked; obj[fd.k] = auto.checked ? null : parseFloat(r.value); after(); });
+        r.addEventListener('input', () => { obj[fd.k] = parseFloat(r.value); h.onInput(); });
+        r.addEventListener('change', after);
+        wrap.append(r, el('label', { class: 'mini' }, auto, ' map default'));
         input = wrap;
         break;
       }

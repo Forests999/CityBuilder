@@ -110,3 +110,14 @@ button.wide { display: block; width: 100%; margin: 6px 0; text-align: left; }
 
 .layer { user-select: none; }
 .layer .grip { touch-action: none; }
+
+.optrange { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.optrange input[type=range] { width: 100%; accent-color: var(--accent); }
+.optrange input[type=range]:disabled { opacity: .35; }
+.optrange .mini { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+#tools { gap: 1px; scrollbar-width: thin; scrollbar-color: #4a4b54 transparent; }
+.tool { height: 34px; }
+#tools::-webkit-scrollbar { width: 6px; }
+#tools::-webkit-scrollbar-thumb { background: #4a4b54; border-radius: 3px; }
+#tools::-webkit-scrollbar-track { background: transparent; }

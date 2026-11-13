@@ -82,3 +82,9 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 
 - **Open walls:** untick *Closed loop* on a wall to make a free-standing segment. *Wall only free edges* on a district creates open walls along only the borders it does not share with another district.
 - **Square plazas** (Q) can be rotated and stretched into rectangles; round plazas are P.
+- **Cut away (X):** outline an area to remove it from the districts below it in the layer list, giving a hole, bay or notch inside a district. It can show whatever is underneath, open ground, or a park.
+- **Building shapes (J):** stars (4–12 points), squares, rectangles, diamonds, triangles, hexagons, octagons, circles and crosses, with size, rotation and point depth. A building can use the *district blocks* look so it shares the fill, hatching and line weight of the surrounding blocks.
+- **Plaza centerpiece → Market stalls:** small squares and rectangles laid out across the plaza.
+- **Label borders** can be set per label (or left on the map default); river names have their own opacity.
+- **Compass** is a classic faceted rose and can be rotated in its properties.
+- Splitting a district also adds a wider street along the cut (delete it in Layers if unwanted).

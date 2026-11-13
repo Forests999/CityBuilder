@@ -111,7 +111,7 @@ export function randomCity(seed) {
   // Unnamed sectors get floating district labels
   for (const i of sectors.slice(0, 3)) {
     const a1 = angles[i], a2 = angles[(i + 1) % nAv] + (i === nAv - 1 ? Math.PI * 2 : 0);
-    F.push(createFeature('label', [at((a1 + a2) / 2, 0.76)], { text: districtName(R), style: 'district', size: 36, spacing: 0.35, angle: Math.round(R.range(-30, 30)) }));
+    F.push(createFeature('label', [at((a1 + a2) / 2, 0.76)], { text: districtName(R), style: 'district', size: 36, spacing: 0.12, angle: Math.round(R.range(-30, 30)) }));
   }
 
   // Landmarks

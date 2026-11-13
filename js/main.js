@@ -5,6 +5,7 @@ import * as G from './geom.js';
 import { renderMap, releaseLayers, plazaCorners, featureShape, isClosed, isPointType, getColors, findWalls } from './render.js';
 import { SCHEMAS, buildForm, el } from './ui.js';
 import { randomCity } from './starter.js';
+import { shapePoints } from './shapes.js';
 import { THEMES, COLOR_KEYS, FONTS } from './themes.js';
 
 const $ = (s) => document.querySelector(s);
@@ -33,6 +34,8 @@ const ICON = {
   label: '<path d="M5 5h14M12 5v14M9 19h6"/>',
   compass: '<circle cx="12" cy="12" r="9"/><path d="M12 4l2.5 8-2.5 8-2.5-8z"/>',
   split: '<path d="M4 6l9-3 7 6-3 11-11-2z" opacity=".5"/><path d="M3 20L21 4" stroke-dasharray="3 2"/>',
+  cutout: '<path d="M4 6l9-3 7 6-3 11-11-2z" opacity=".5"/><circle cx="12" cy="12" r="3.5" stroke-dasharray="2.5 2"/>',
+  buildingShape: '<path d="M12 3l2.2 5.3 5.6.4-4.3 3.7 1.4 5.5L12 15l-4.9 2.9 1.4-5.5-4.3-3.7 5.6-.4z"/>',
   farm: '<path d="M3 6h18v13H3z"/><path d="M3 12h18M11 6v13"/><path d="M5 8.5h4M5 10h4M13 14h6M13 16.5h6" opacity=".6"/>',
 };
 
@@ -41,6 +44,7 @@ const TOOLS = [
   { id: 'wall', key: 'w', type: 'wall', draw: 'poly', label: 'City wall', hint: 'Click to place wall corners · drag to sketch freehand · click the first point, double-click or Enter to close' },
   { id: 'district', key: 'd', type: 'district', draw: 'poly', label: 'District', hint: 'Outline a district; streets are generated inside it. Click the first point or double-click to finish' },
   { id: 'split', key: 'k', draw: 'line', label: 'Split district', hint: 'Draw a line across a district or farmland to break it in two (only the selected one, if any) · double-click / Enter to cut' },
+  { id: 'cutout', key: 'x', type: 'cutout', draw: 'poly', label: 'Cut away', hint: 'Outline an area to cut out of the districts below it (a hole, bay or notch inside a district) · double-click to finish' },
   { id: 'farm', key: 'g', type: 'farm', draw: 'poly', label: 'Farmland', hint: 'Outline farmland; it fills with fields, furrows and hedgerows · double-click to finish' },
   { id: 'water', key: 'a', type: 'water', draw: 'poly', label: 'Lake / sea / bay', hint: 'Outline a body of water (drag to sketch a coastline) · double-click to finish' },
   { id: 'river', key: 'f', type: 'river', draw: 'line', label: 'River', hint: 'Click points along the river (or drag freehand) · double-click / Enter to finish' },
@@ -51,6 +55,7 @@ const TOOLS = [
   { id: 'plaza', key: 'p', type: 'plaza', draw: 'point', label: 'Round plaza', hint: 'Click to place a round plaza' },
   { id: 'plazaSq', key: 'q', type: 'plaza', draw: 'point', label: 'Square plaza', extra: { shape: 'square', radius: 28, monument: 'none' }, hint: 'Click to place a square plaza; set rotation and proportions in the panel' },
   { id: 'building', key: 'b', type: 'building', draw: 'poly', label: 'Building / keep', hint: 'Outline a large building, keep or monument · double-click to finish' },
+  { id: 'buildingShape', key: 'j', type: 'building', draw: 'point', label: 'Building shape (star, square, round…)', extra: { shape: 'star8', size: 28, style: 'solid' }, hint: 'Click to place a preset building shape; change the shape, size and look in the panel' },
   { id: 'landmark', key: 'l', type: 'landmark', draw: 'point', label: 'Landmark', hint: 'Click to place a labelled landmark dot' },
   { id: 'label', key: 't', type: 'label', draw: 'point', label: 'Text label', hint: 'Click to place a label, then type its text in the panel' },
   { id: 'compass', key: 'c', type: 'compass', draw: 'point', label: 'Compass rose', hint: 'Click to place a compass rose' },
@@ -189,7 +194,7 @@ function hitTest(w) {
   }
   // Areas: topmost layer first.
   for (const f of fs) {
-    if (!['building', 'district', 'water', 'farm'].includes(f.type)) continue;
+    if (!['building', 'district', 'water', 'farm', 'cutout'].includes(f.type)) continue;
     const sh = featureShape(f, doc);
     if (sh.length >= 3 && G.pointInPoly(w, sh)) out.push({ id: f.id, kind: 'move' });
   }
@@ -281,7 +286,7 @@ function splitPolygon(P, L) {
   const A = walk(h1, h2).concat(inner.slice().reverse());
   const B = walk(h2, h1).concat(inner);
   if (Math.abs(G.polyArea(A)) < 50 || Math.abs(G.polyArea(B)) < 50) return null;
-  return [A, B];
+  return [A, B, [h1.p.slice(), ...inner, h2.p.slice()]];
 }
 
 function splitAreas(line, targetId) {
@@ -295,8 +300,10 @@ function splitAreas(line, targetId) {
     const exact = !!(f.followWall || f.smooth);
     const P = exact ? featureShape(f, doc) : f.points;
     if (!P || P.length < 3) continue;
-    let parts = splitPolygon(P, line);
-    if (!parts) continue;
+    const res = splitPolygon(P, line);
+    if (!res) continue;
+    let parts = [res[0], res[1]];
+    const cut = res[2];
     if (exact) parts = parts.map((p) => G.simplifyPath(p, 0.7));
     if (f.followWall) { if (!f.clipWall) f.clipWall = f.followWall; f.followWall = ''; }
     if (exact) f.smooth = false;
@@ -309,17 +316,27 @@ function splitAreas(line, targetId) {
     if (f.name === 'City fill') f.name = 'District';
     doc.features.splice(doc.features.indexOf(f) + 1, 0, c);
     made = c.id; count++;
+    // A street along the cut, wider than the district's own streets, so the new boundary reads as a main road.
+    if (f.type === 'district' && cut.length >= 2) {
+      const w = Math.max(8, (+f.borderStreet || 0) * 2.2);
+      const pts = cut.map((p) => p.slice());
+      const trim = (a, b) => { const d = G.dist(a, b), t = Math.min(0.4, (w * 0.3) / (d || 1)); return G.lerp(a, b, t); };
+      pts[0] = trim(pts[0], pts[1]);
+      pts[pts.length - 1] = trim(pts[pts.length - 1], pts[pts.length - 2]);
+      S.insertFeature(S.createFeature('road', pts, { kind: 'street', width: w, ruralOutside: false, gates: false, smooth: false }));
+    }
   }
   if (!count) { toast('The line must cross all the way through a district (or farmland) to split it.'); requestRender(); return; }
   app.sel = made;
   setTool('select');
   S.commit();
-  toast(count === 1 ? 'Split into two — the new piece is selected. Pick a preset to restyle it.' : `Split ${count} areas.`);
+  toast(count === 1 ? 'Split into two; a wider street runs along the cut (delete it in Layers if unwanted). The new piece is selected.' : `Split ${count} areas.`);
 }
 
 function placePoint(t, w) {
   const f = S.createFeature(t.type, [w], t.extra || {});
   if (t.type === 'label') f.text = 'New Label';
+  if (t.type === 'building') f.points = shapePoints(f.shape, w, f.size, f.angle, f.aspect, f.inner) || [w];
   S.insertFeature(f);
   app.sel = f.id;
   app.tab = 'props';
@@ -349,6 +366,14 @@ function duplicateSelected() {
 }
 
 const ctxHelpers = {
+  haloDefault() { return S.getDoc().settings.haloWidth ?? 0.34; },
+  // Rebuild a preset-shaped building around its current centre.
+  reshapeBuilding(f) {
+    if (f.shape === 'free' || !f.points.length) return;
+    const c = f.points.length >= 3 ? G.centroid(f.points) : f.points[0];
+    const pts = shapePoints(f.shape, c, f.size, f.angle, f.aspect, f.inner);
+    if (pts) { f.points = pts; f.smooth = false; }
+  },
   wallOptions() {
     return S.getDoc().features.filter((f) => f.type === 'wall' && f.closed !== false).map((w, i) => [w.id, w.name || `Wall ${i + 1}`]);
   },
@@ -650,7 +675,7 @@ function renderProps(body) {
   });
 }
 
-const TYPE_ICON = { wall: 'wall', district: 'district', farm: 'farm', water: 'water', river: 'river', road: 'road', plaza: 'plaza', building: 'building', landmark: 'landmark', label: 'label', compass: 'compass' };
+const TYPE_ICON = { wall: 'wall', district: 'district', cutout: 'cutout', farm: 'farm', water: 'water', river: 'river', road: 'road', plaza: 'plaza', building: 'building', landmark: 'landmark', label: 'label', compass: 'compass' };
 
 function renderLayers(body) {
   const doc = S.getDoc();
