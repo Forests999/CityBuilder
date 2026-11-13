@@ -844,40 +844,6 @@ export function renderMap(ctx, doc, o) {
     }
     ctx.strokeStyle = C.street; ctx.fillStyle = C.street;
     strokeRoads(ctx, masked, 0);
-    // Roads whose generated streets don't follow them get a continuous dark edge along both sides, so they
-    // stay clearly bordered even where no block touches them. The edge stops short of each end and fades
-    // in, so the ends transition softly, and it is cleared wherever another road or a plaza lies.
-    const edged = masked.filter((r) => (r.steer === false || r.carve === false) && r.border !== false && shape.get(r.id).length >= 3);
-    if (edged.length) {
-      const g = getLayer(1, ctx);
-      g.lineCap = 'butt'; g.lineJoin = 'round'; g.strokeStyle = C.outline; g.lineWidth = Math.max(0.6, ow);
-      for (const r of edged) {
-        const sh = shape.get(r.id), nrm = G.pathNormals(sh, !!r.closed), cum = G.cumLengths(r.closed ? sh.concat([sh[0]]) : sh);
-        const total = cum[cum.length - 1], off = r.width / 2 + ow / 2;
-        const ramp = Math.max(14, r.width * 2), inset = r.width * 0.5;
-        const alphaAt = (s) => (r.closed ? 0.8 : 0.8 * Math.max(0, Math.min(1, (s - inset) / ramp)) * Math.max(0, Math.min(1, (total - inset - s) / ramp)));
-        const cl = r.ruralOutside && allWallsClip;
-        if (cl) { g.save(); cl(g); }
-        const n = r.closed ? sh.length : sh.length - 1;
-        for (const side of [1, -1]) {
-          for (let i = 0; i < n; i++) {
-            const j = (i + 1) % sh.length, a = alphaAt((cum[i] + cum[i + 1]) / 2);
-            if (a < 0.03) continue;
-            const p = G.add(sh[i], G.scale(nrm[i], side * off)), q = G.add(sh[j], G.scale(nrm[j], side * off));
-            g.globalAlpha = a; g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke();
-          }
-        }
-        if (cl) g.restore();
-      }
-      g.globalAlpha = 1;
-      g.globalCompositeOperation = 'destination-out'; g.lineCap = 'round'; g.strokeStyle = '#000'; g.fillStyle = '#000';
-      strokeRoads(g, cityRoadsAll, 0);
-      g.beginPath();
-      for (const p of allPlazas) plazaPath(g, p, 0);
-      g.fill();
-      g.globalCompositeOperation = 'source-over';
-      blit(ctx, g);
-    }
     ctx.beginPath();
     for (const p of plazas) plazaPath(ctx, p, 0);
     ctx.fill();
