@@ -146,7 +146,8 @@ export const SCHEMAS = {
     { t: 'heading', label: 'Shape' },
     { k: 'shape', label: 'Shape preset', t: 'select', options: BUILDING_SHAPES, rebuild: true, onChange: (f, ctx) => ctx.reshapeBuilding(f) },
     { k: 'size', label: 'Size', t: 'range', min: 4, max: 300, step: 1, live: true, show: (f) => f.shape !== 'free', onChange: (f, ctx) => ctx.reshapeBuilding(f) },
-    { k: 'aspect', label: 'Width ÷ height', t: 'range', min: 0.3, max: 4, step: 0.05, live: true, show: (f) => f.shape === 'rect', onChange: (f, ctx) => ctx.reshapeBuilding(f) },
+    { k: 'aspect', label: 'Stretch', t: 'range', min: 0.3, max: 4, step: 0.05, live: true, show: (f) => ['rect', 'dockComb', 'dockPier'].includes(f.shape), onChange: (f, ctx) => ctx.reshapeBuilding(f) },
+    { k: 'fingers', label: 'Number of piers', t: 'range', min: 1, max: 14, step: 1, live: true, show: (f) => f.shape === 'dockComb', onChange: (f, ctx) => ctx.reshapeBuilding(f) },
     { k: 'inner', label: 'Point depth', t: 'range', min: 0.15, max: 0.9, step: 0.01, live: true, show: (f) => /^star/.test(f.shape), onChange: (f, ctx) => ctx.reshapeBuilding(f) },
     { k: 'angle', label: 'Rotation', t: 'range', min: -180, max: 180, step: 1, live: true, show: (f) => f.shape !== 'free', onChange: (f, ctx) => ctx.reshapeBuilding(f) },
     { k: 'smooth', label: 'Smooth edges', t: 'check' },
@@ -157,6 +158,8 @@ export const SCHEMAS = {
     { k: 'color', label: 'Custom fill', t: 'color' },
     GAP,
     { k: 'border', label: 'Black border', t: 'check' },
+    { k: 'blend', label: 'Blend into districts', t: 'check' },
+    { t: 'info', text: 'Hides the outline and the block rim wherever this overlaps a district, like a road does, so docks melt into the blocks they touch and only show their edge over water.' },
   ],
   cutout: [
     label('name'),

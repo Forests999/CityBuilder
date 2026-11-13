@@ -52,6 +52,7 @@ const ICON = {
   compass: '<circle cx="12" cy="12" r="9"/><path d="M12 4l2.5 8-2.5 8-2.5-8z"/>',
   split: '<path d="M4 6l9-3 7 6-3 11-11-2z" opacity=".5"/><path d="M3 20L21 4" stroke-dasharray="3 2"/>',
   cutout: '<path d="M4 6l9-3 7 6-3 11-11-2z" opacity=".5"/><circle cx="12" cy="12" r="3.5" stroke-dasharray="2.5 2"/>',
+  docks: '<path d="M3 9h18v3H3z"/><path d="M5.5 12v8M10 12v8M14 12v8M18.5 12v8"/>',
   buildingShape: '<path d="M12 3l2.2 5.3 5.6.4-4.3 3.7 1.4 5.5L12 15l-4.9 2.9 1.4-5.5-4.3-3.7 5.6-.4z"/>',
   farm: '<path d="M3 6h18v13H3z"/><path d="M3 12h18M11 6v13"/><path d="M5 8.5h4M5 10h4M13 14h6M13 16.5h6" opacity=".6"/>',
 };
@@ -73,6 +74,7 @@ const TOOLS = [
   { id: 'plazaSq', key: 'q', type: 'plaza', draw: 'point', label: 'Square plaza', extra: { shape: 'square', radius: 28, monument: 'none' }, hint: 'Click to place a square plaza; set rotation and proportions in the panel' },
   { id: 'building', key: 'b', type: 'building', draw: 'poly', label: 'Building / keep', hint: 'Outline a large building, keep or monument · double-click to finish' },
   { id: 'buildingShape', key: 'j', type: 'building', draw: 'point', label: 'Building shape (star, square, round…)', extra: { shape: 'star8', size: 28, style: 'solid' }, hint: 'Click to place a preset building shape; change the shape, size and look in the panel' },
+  { id: 'docks', key: 'o', type: 'building', draw: 'point', label: 'Docks / pier', extra: { shape: 'dockComb', size: 70, aspect: 1, fingers: 5, style: 'district', tone: 'normal', hatch: true, blend: true, gap: 0, name: 'Docks' }, hint: 'Click to place docks (a quay with piers); put them over water. Rotate, resize and change the number of piers in the panel; choose the pier / jetty shape for a single jetty' },
   { id: 'landmark', key: 'l', type: 'landmark', draw: 'point', label: 'Landmark', hint: 'Click to place a labelled landmark dot' },
   { id: 'label', key: 't', type: 'label', draw: 'point', label: 'Text label', hint: 'Click to place a label, then type its text in the panel' },
   { id: 'streetName', key: 'y', type: 'label', draw: 'point', label: 'Street name', hint: 'Click on a road to add a street name that runs along it (drag it to slide it along the road)' },
@@ -87,7 +89,7 @@ const TOOL_GROUPS = [
   { id: 'select', label: 'Select', tools: ['select'] },
   { id: 'areas', label: 'Areas', tools: ['district', 'farm', 'water', 'cutout'] },
   { id: 'lines', label: 'Lines & walls', tools: ['wall', 'river', 'canal', 'road', 'street', 'rural'] },
-  { id: 'places', label: 'Places', tools: ['plaza', 'plazaSq', 'building', 'buildingShape', 'landmark'] },
+  { id: 'places', label: 'Places', tools: ['plaza', 'plazaSq', 'building', 'buildingShape', 'docks', 'landmark'] },
   { id: 'text', label: 'Text & compass', tools: ['label', 'streetName', 'compass'] },
   { id: 'edit', label: 'Edit areas', tools: ['split'] },
 ];
@@ -507,7 +509,7 @@ function placePoint(t, w) {
   if (t.id === 'streetName') { placeStreetName(w); return; }
   const f = S.createFeature(t.type, [w], t.extra || {});
   if (t.type === 'label') f.text = 'New Label';
-  if (t.type === 'building') f.points = shapePoints(f.shape, w, f.size, f.angle, f.aspect, f.inner) || [w];
+  if (t.type === 'building') f.points = shapePoints(f.shape, w, f.size, f.angle, f.aspect, f.inner, f.fingers) || [w];
   S.insertFeature(f);
   app.sel = f.id;
   app.tab = 'props';
@@ -598,7 +600,7 @@ const ctxHelpers = {
   reshapeBuilding(f) {
     if (f.shape === 'free' || !f.points.length) return;
     const c = f.points.length >= 3 ? G.centroid(f.points) : f.points[0];
-    const pts = shapePoints(f.shape, c, f.size, f.angle, f.aspect, f.inner);
+    const pts = shapePoints(f.shape, c, f.size, f.angle, f.aspect, f.inner, f.fingers);
     if (pts) { f.points = pts; f.smooth = false; }
   },
   wallOptions() {

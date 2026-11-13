@@ -38,7 +38,7 @@ export const DEFAULTS = {
   road: { name: '', kind: 'avenue', width: 13, ruralOutside: true, gates: true, closed: false, steer: true, border: true, smooth: true },
   plaza: { name: '', border: true, radius: 22, shape: 'round', aspect: 1, angle: 0, monument: 'dot' },
   building: {
-    name: '', style: 'solid', tone: 'normal', hatch: true, color: '', gap: null, border: true, smooth: false,
+    name: '', style: 'solid', tone: 'normal', hatch: true, color: '', gap: null, border: true, blend: false, fingers: 4, smooth: false,
     shape: 'free', size: 24, aspect: 1.5, inner: 0.45, angle: 0,
   },
   landmark: { name: 'Landmark', size: 6, showLabel: true, labelSize: 20, labelOffset: [0, -28], halo: null },

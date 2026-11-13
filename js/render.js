@@ -508,25 +508,41 @@ function drawMonument(ctx, p, C, S) {
     case 'tree':
       circle(ctx, c, r * 0.45); ctx.fillStyle = C.park; ctx.fill(); ctx.strokeStyle = C.outline; ctx.lineWidth = S.outline; ctx.stroke(); break;
     case 'market': {
-      // Small stalls (squares and rectangles) laid out in loose rows across the plaza.
+      // Stalls scattered at random: varied sizes, shapes (long stalls, squarish ones, round carts),
+      // angles and tints, placed without overlapping so the square reads as a lively, organic market.
       const rnd = mulberry32(hashStr(p.id));
       const sq = p.shape === 'square';
       const a = sq ? ((p.angle || 0) * Math.PI) / 180 : 0;
       const hw = sq ? r * (p.aspect || 1) : r, hh = r;
-      const step = Math.max(6, r * 0.3);
-      const nx = Math.max(1, Math.floor((hw * 1.56) / step) + 1), ny = Math.max(1, Math.floor((hh * 1.56) / step) + 1);
-      ctx.fillStyle = C.block; ctx.strokeStyle = C.outline; ctx.lineWidth = Math.max(0.8, S.outline * 0.8);
-      for (let i = 0; i < nx; i++) {
-        for (let j = 0; j < ny; j++) {
-          const gx = (i - (nx - 1) / 2) * step, gy = (j - (ny - 1) / 2) * step;
-          if (!sq && Math.hypot(gx, gy) > r * 0.74) continue;
-          if (rnd() < 0.2) continue;
-          const horiz = rnd() < 0.5, w = step * (horiz ? 0.72 : 0.46), h = step * (horiz ? 0.46 : 0.72);
-          const rot = a + (sq ? 0 : (rnd() - 0.5) * 0.35);
-          const ctr = G.add(G.rotate([gx, gy], a), c);
-          const quad = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map((q) => G.add(G.rotate(q, rot), ctr));
-          ctx.beginPath(); addPath(ctx, quad, true); ctx.fill(); ctx.stroke();
-        }
+      const inset = 0.84;
+      const area = sq ? 4 * hw * hh : Math.PI * r * r;
+      const unit = Math.max(3.2, r * 0.17);
+      const want = Math.max(5, Math.min(80, Math.round(area / (unit * unit * 5.5))));
+      const placed = [];
+      for (let tries = 0; placed.length < want && tries < want * 25; tries++) {
+        let lx, ly;
+        if (sq) { lx = (rnd() * 2 - 1) * hw * inset; ly = (rnd() * 2 - 1) * hh * inset; }
+        else { const t = Math.sqrt(rnd()) * r * inset, th = rnd() * Math.PI * 2; lx = Math.cos(th) * t; ly = Math.sin(th) * t; }
+        const kind = rnd();
+        let w, h, round = false;
+        if (kind < 0.12) { w = h = unit * (0.5 + rnd() * 0.35); round = true; }
+        else if (kind < 0.3) { w = unit * (0.9 + rnd() * 0.5); h = w * (0.8 + rnd() * 0.4); }
+        else { w = unit * (0.9 + rnd() * 1.6); h = unit * (0.45 + rnd() * 0.6); }
+        // Mostly square to the plaza, some askew, a few pointing anywhere; some turned a quarter turn.
+        const o = rnd();
+        const rot = a + (o < 0.55 ? (rnd() - 0.5) * 0.12 : o < 0.85 ? (rnd() - 0.5) * 0.8 : rnd() * Math.PI) + (rnd() < 0.4 ? Math.PI / 2 : 0);
+        const rad = Math.hypot(w, h) / 2;
+        if (placed.some((q) => Math.hypot(q.x - lx, q.y - ly) < (q.rad + rad) * 0.82)) continue;
+        placed.push({ x: lx, y: ly, w, h, rot, round, rad, tint: rnd() });
+      }
+      ctx.lineWidth = Math.max(0.8, S.outline * 0.8); ctx.strokeStyle = C.outline;
+      for (const s of placed) {
+        const ctr = G.add(G.rotate([s.x, s.y], a), c);
+        ctx.fillStyle = s.tint < 0.25 ? C.blockLight : s.tint > 0.8 ? C.blockDark : C.block;
+        ctx.beginPath();
+        if (s.round) circle(ctx, ctr, s.w / 2);
+        else addPath(ctx, [[-s.w / 2, -s.h / 2], [s.w / 2, -s.h / 2], [s.w / 2, s.h / 2], [-s.w / 2, s.h / 2]].map((q) => G.add(G.rotate(q, s.rot), ctr)), true);
+        ctx.fill(); ctx.stroke();
       }
       break;
     }
@@ -646,7 +662,7 @@ export function renderMap(ctx, doc, o) {
     g.lineCap = 'round'; g.lineJoin = 'round';
     for (const f of carvers) {
       // Shapes with their dark border turned off get no outline rim where they cut into the blocks.
-      const ex = f.border === false ? 0 : exAll;
+      const ex = f.border === false || (f.type === 'building' && f.blend) ? 0 : exAll;
       const sh = shape.get(f.id);
       if (f.type === 'road') {
         if (f.kind === 'rural' || sh.length < 2) continue;
@@ -951,7 +967,21 @@ export function renderMap(ctx, doc, o) {
           const a = Math.max(0, Math.min(1, (k - 0.35) / 0.8));
           if (a > 0) { ctx.globalAlpha = a; ctx.fillStyle = hatchPattern(ctx, C.hatch, S.hatchSpacing); ctx.fill(); ctx.globalAlpha = 1; }
         }
-        if (f.border !== false) { ctx.strokeStyle = C.outline; ctx.lineWidth = asBlock ? ow : ow * 1.3; ctx.stroke(); }
+        if (f.border !== false) {
+          const lw = asBlock ? ow : ow * 1.3;
+          if (f.blend) {
+            // Like a road, the outline shows only outside districts, so a dock melts into the blocks it touches.
+            const g = getLayer(2, ctx);
+            g.beginPath(); addPath(g, sh, true); g.strokeStyle = C.outline; g.lineWidth = lw; g.stroke();
+            g.globalCompositeOperation = 'destination-out'; g.fillStyle = '#000';
+            for (const d of feats) {
+              if (d.type !== 'district' || shape.get(d.id).length < 3) continue;
+              g.beginPath(); addPath(g, shape.get(d.id), true); g.fill();
+            }
+            g.globalCompositeOperation = 'source-over';
+            blit(ctx, g);
+          } else { ctx.strokeStyle = C.outline; ctx.lineWidth = lw; ctx.stroke(); }
+        }
         break;
       }
       case 'cutout':
