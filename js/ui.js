@@ -129,8 +129,8 @@ export const SCHEMAS = {
     { k: 'closed', label: 'Closed loop', t: 'check' },
     { k: 'smooth', label: 'Smooth curve', t: 'check' },
     { k: 'border', label: 'Black outline', t: 'check' },
-    { k: 'carve', label: 'Shape the districts around it', t: 'check' },
-    { t: 'info', text: 'On: blocks are cut away around the road and nearby generated streets line up with it. Off: the road is simply drawn over the districts and leaves them untouched.' },
+    { k: 'steer', label: 'Generated streets follow it', t: 'check' },
+    { t: 'info', text: 'Either way the road cuts cleanly through the blocks. On: nearby generated streets also line up with it (the district layout adapts). Off: the district keeps the street layout it would have had without this road.' },
   ],
   plaza: [
     label('name'),

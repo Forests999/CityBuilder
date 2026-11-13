@@ -627,7 +627,7 @@ export function renderMap(ctx, doc, o) {
   // Roads and rivers that nearby generated streets line up with.
   let guidesCache = null;
   const getGuides = () => guidesCache || (guidesCache = prepGuides(
-    feats.filter((f) => (f.type === 'road' && f.kind !== 'rural' && f.carve !== false) || f.type === 'river').map((f) => shape.get(f.id)).filter((s) => s.length >= 2)));
+    feats.filter((f) => (f.type === 'road' && f.kind !== 'rural' && f.steer !== false && f.carve !== false) || f.type === 'river').map((f) => shape.get(f.id)).filter((s) => s.length >= 2)));
   let riverPolysCache = null;
   const riverPolys = () => riverPolysCache || (riverPolysCache = feats.filter((f) => f.type === 'river' && shape.get(f.id).length >= 2).map((f) => riverGeo(f).poly));
   // Slightly inset so a river's fill overlaps the lake's fill by a hair (no antialiasing line where they meet).
@@ -698,7 +698,7 @@ export function renderMap(ctx, doc, o) {
     for (const x of items) { if (x.d.border === false) continue; within(ctx, x, () => { ctx.beginPath(); addPath(ctx, x.sh, true); ctx.strokeStyle = C.outline; ctx.lineWidth = ow * 2; ctx.stroke(); }); }
     // One fill per wall-clip group, so neighbouring districts form a single shape with no hairline between them.
     // Cut-aways above the districts are erased from it so the hole really is open.
-    const carvers = above.filter((f) => CARVERS[f.type] && !(f.type === 'road' && f.carve === false));
+    const carvers = above.filter((f) => CARVERS[f.type]);
     const cutouts = carvers.filter((f) => f.type === 'cutout' && shape.get(f.id).length >= 3);
     const groups = new Map();
     for (const x of items) { const key = String(x.d.clipWall || ''); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(x); }
@@ -771,7 +771,7 @@ export function renderMap(ctx, doc, o) {
   function drawRoadRun(run, below) {
     const roads = run.filter((r) => r.type === 'road' && shape.get(r.id).length >= 2);
     const city = roads.filter((r) => r.kind !== 'rural');
-    const masked = city.filter((r) => r.carve !== false), free = city.filter((r) => r.carve === false);
+    const masked = city;
     const plazas = run.filter((p) => p.type === 'plaza' && p.points.length);
     const districts = below.filter((f) => f.type === 'district' && shape.get(f.id).length >= 3);
     const lastD = below.map((f) => f.type).lastIndexOf('district');
@@ -825,45 +825,6 @@ export function renderMap(ctx, doc, o) {
         g2.fill();
         blit(ctx, g2);
       }
-    }
-    // Roads set to leave the districts alone get their own layer: a softened outline that is cleared
-    // wherever another road or a plaza lies (so no stray borders across junctions), then the road
-    // surface, then the two ends faded out so they melt into the blocks beside them. An end that meets
-    // another road or plaza stays solid so the join is clean.
-    if (free.length) {
-      const g = getLayer(1, ctx);
-      g.lineCap = 'round'; g.lineJoin = 'round';
-      g.globalAlpha = 0.65; g.strokeStyle = C.outline;
-      strokeRoads(g, free.filter((r) => r.border !== false), ow * 2);
-      g.globalAlpha = 1;
-      g.globalCompositeOperation = 'destination-out'; g.strokeStyle = '#000'; g.fillStyle = '#000';
-      strokeRoads(g, cityRoadsAll, 0);
-      g.beginPath();
-      for (const p of allPlazas) plazaPath(g, p, 0);
-      g.fill();
-      g.globalCompositeOperation = 'source-over';
-      g.strokeStyle = C.street;
-      strokeRoads(g, free, 0);
-      g.globalCompositeOperation = 'destination-out';
-      for (const r of free) {
-        const sh = shape.get(r.id);
-        if (r.closed || sh.length < 2) continue;
-        for (const end of [0, 1]) {
-          const p = end ? sh[sh.length - 1] : sh[0], q = end ? sh[sh.length - 2] : sh[1];
-          const joins = cityRoadsAll.some((o) => o !== r && G.nearestOnPath(p, shape.get(o.id), o.closed).d < o.width / 2 + r.width / 2 + 2)
-            || allPlazas.some((pl) => G.dist(p, pl.points[0]) < pl.radius + r.width / 2 + 2);
-          if (joins) continue;
-          const dir = G.norm(G.sub(p, q)), L = Math.max(10, r.width * 1.6), half = r.width + 6;
-          g.save();
-          g.translate(p[0], p[1]); g.rotate(Math.atan2(dir[1], dir[0]));
-          const gr = g.createLinearGradient(-L, 0, r.width * 0.5, 0);
-          gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,1)');
-          g.fillStyle = gr; g.fillRect(-L, -half, L + r.width, 2 * half);
-          g.restore();
-        }
-      }
-      g.globalCompositeOperation = 'source-over';
-      blit(ctx, g);
     }
     ctx.strokeStyle = C.street; ctx.fillStyle = C.street;
     strokeRoads(ctx, masked, 0);
