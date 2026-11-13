@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>City Builder</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside>
+  <h1>City Builder</h1>
+  <label>Title <input id="title" type="text"></label>
+  <label>Seed <span class="row"><input id="seed" type="number"><button id="reroll">Reroll</button></span></label>
+
+  <h2>Layout</h2>
+  <label>Spokes <b id="spokesv"></b><input id="spokes" type="range" min="4" max="24" step="1"></label>
+  <label>Rings <b id="ringsv"></b><input id="rings" type="range" min="1" max="6" step="1"></label>
+  <label>Building density <b id="densityv"></b><input id="density" type="range" min="0.4" max="3" step="0.1"></label>
+
+  <h2>Rivers</h2>
+  <div class="row"><span id="riverlabel"></span><button id="nextriver">Next</button></div>
+  <label>Width <b id="rwidthv"></b><input id="rwidth" type="range" min="8" max="120" step="1"></label>
+  <div class="row"><button id="addriver">Add river</button><button id="delriver">Delete river</button></div>
+
+  <h2>Editing</h2>
+  <label class="check"><input id="handles" type="checkbox" checked> Show handles</label>
+  <p class="hint">Drag <span class="dot wall"></span> wall, <span class="dot river"></span> river, <span class="dot center"></span> center.
+  Drag a small hollow dot to add a point. Double-click a point to delete it.</p>
+
+  <h2>File</h2>
+  <div class="row"><button id="exsvg">SVG</button><button id="expng">PNG</button></div>
+  <div class="row"><button id="exjson">Save</button><label class="btn">Load<input id="imjson" type="file" accept=".json" hidden></label></div>
+  <button id="reset" class="danger">Reset map</button>
+</aside>
+<main><svg id="map" xmlns="http://www.w3.org/2000/svg"></svg></main>
+<script src="js/geom.js"></script>
+<script src="js/generate.js"></script>
+<script src="js/render.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
