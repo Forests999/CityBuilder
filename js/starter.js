@@ -72,11 +72,11 @@ export function randomCity(seed) {
   const sectors = angles.map((_, i) => i);
   const take = () => sectors.splice(R.int(0, sectors.length - 1), 1)[0];
   const slum = take(), docks = take();
-  F.push(createFeature('district', wedge(slum, 0.62, 1.25), { name: districtName(R), preset: 'dense', ...PRESETS.dense, clipWall: wallId, borderStreet: 3.5, seed: R.int(1, 1e9), labelSize: 28 }));
-  F.push(createFeature('district', wedge(docks, 0.56, 1.25), { name: districtName(R), preset: 'townhouses', ...PRESETS.townhouses, clipWall: wallId, borderStreet: 4, seed: R.int(1, 1e9), labelSize: 28 }));
+  F.push(createFeature('district', wedge(slum, 0.62, 1.25), { name: districtName(R), preset: 'dense', ...PRESETS.dense, clipWall: wallId, borderStreet: 3.5, seed: R.int(1, 1e9), labelSize: 38 }));
+  F.push(createFeature('district', wedge(docks, 0.56, 1.25), { name: districtName(R), preset: 'townhouses', ...PRESETS.townhouses, clipWall: wallId, borderStreet: 4, seed: R.int(1, 1e9), labelSize: 38 }));
   const core = [];
   for (let s = 0; s < 16; s++) core.push(at((s / 16) * Math.PI * 2, 0.42));
-  F.push(createFeature('district', core, { name: districtName(R), preset: 'noble', ...PRESETS.noble, borderStreet: 0, seed: R.int(1, 1e9), labelSize: 26, labelOffset: [0, rad * 0.24] }));
+  F.push(createFeature('district', core, { name: districtName(R), preset: 'noble', ...PRESETS.noble, borderStreet: 0, seed: R.int(1, 1e9), labelSize: 36, labelOffset: [0, rad * 0.24] }));
 
   // River sweeping past the center, plus a canal
   const th = R.range(0, Math.PI * 2), d = G.fromAngle(th), n = G.perp(d), phi = R.range(0.4, 2.7);
@@ -105,13 +105,13 @@ export function randomCity(seed) {
     const x = G.pathIntersections(G.densify(av, false, 10), false, wallDense, true)[0];
     if (!x) continue;
     const out = G.norm(G.sub(x.p, C));
-    F.push(createFeature('label', [G.add(x.p, G.scale(out, 85))], { text: R.pick(WORD) + ' Gate', style: 'gate', size: 20, spacing: 0.12 }));
+    F.push(createFeature('label', [G.add(x.p, G.scale(out, 85))], { text: R.pick(WORD) + ' Gate', style: 'gate', size: 26, spacing: 0.12 }));
   }
 
   // Unnamed sectors get floating district labels
   for (const i of sectors.slice(0, 3)) {
     const a1 = angles[i], a2 = angles[(i + 1) % nAv] + (i === nAv - 1 ? Math.PI * 2 : 0);
-    F.push(createFeature('label', [at((a1 + a2) / 2, 0.76)], { text: districtName(R), style: 'district', size: 26, spacing: 0.35, angle: Math.round(R.range(-30, 30)) }));
+    F.push(createFeature('label', [at((a1 + a2) / 2, 0.76)], { text: districtName(R), style: 'district', size: 36, spacing: 0.35, angle: Math.round(R.range(-30, 30)) }));
   }
 
   // Landmarks
@@ -121,7 +121,7 @@ export function randomCity(seed) {
     F.push(createFeature('landmark', [p], { name: R.pick(PREFIX) + cityName(R) }));
   }
 
-  F.push(createFeature('label', [[W * 0.12, H * 0.1]], { text: name, style: 'title', size: 64, spacing: 0.2 }));
+  F.push(createFeature('label', [[W * 0.12, H * 0.1]], { text: name, style: 'title', size: 72, spacing: 0.2 }));
   F.push(createFeature('compass', [[W - 230, H - 240]], { size: 120 }));
 
   // Farmland outside the walls

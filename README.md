@@ -77,3 +77,8 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 | `js/ui.js` | Property panel schemas and form builder |
 | `js/themes.js` | Color themes and fonts |
 | `js/geom.js`, `js/rng.js` | Geometry helpers, seeded randomness and noise |
+
+## Notes
+
+- **Open walls:** untick *Closed loop* on a wall to make a free-standing segment. *Wall only free edges* on a district creates open walls along only the borders it does not share with another district.
+- **Square plazas** (Q) can be rotated and stretched into rectangles; round plazas are P.

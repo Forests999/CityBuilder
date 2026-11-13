@@ -19,24 +19,24 @@ export function sortByDefaultOrder(features) {
 }
 
 export const DEFAULTS = {
-  wall: { name: 'City Wall', width: 7, towerSpacing: 60, towerSize: 5, cornerTowers: true, smooth: false, gates: true },
+  wall: { name: 'City Wall', closed: true, width: 7, towerSpacing: 60, towerSize: 5, cornerTowers: true, smooth: false, gates: true },
   district: {
-    name: 'New District', showLabel: true, labelSize: 30, labelAngle: 0, labelSpacing: 0.35, labelOffset: [0, 0],
+    name: 'New District', showLabel: true, labelSize: 42, labelAngle: 0, labelSpacing: 0.35, labelOffset: [0, 0],
     preset: 'standard', ...PRESETS.standard, gridAngle: 0, color: '', borderStreet: 3,
     smooth: false, followWall: '', clipWall: '', seed: 1,
   },
   farm: {
-    name: '', showLabel: false, labelSize: 24, labelAngle: 0, labelSpacing: 0.3, labelOffset: [0, 0],
+    name: '', showLabel: false, labelSize: 32, labelAngle: 0, labelSpacing: 0.3, labelOffset: [0, 0],
     parcelSize: 110, pattern: 'organic', irregularity: 0.6, warp: 6, gridAngle: 0,
     furrows: true, furrowSpacing: 6, hedges: true, smooth: false, clipWall: '', seed: 1,
   },
-  water: { name: '', showLabel: false, labelSize: 40, labelAngle: 0, labelSpacing: 0.4, labelOffset: [0, 0], coastLines: 3, smooth: true },
-  river: { name: 'River', showLabel: true, labelSize: 26, labelSpacing: 1.0, labelPos: 0.5, width: 60, wobble: 0.15, canal: false, smooth: true },
+  water: { name: '', showLabel: false, labelSize: 48, labelAngle: 0, labelSpacing: 0.4, labelOffset: [0, 0], coastLines: 3, smooth: true },
+  river: { name: 'River', showLabel: true, labelSize: 34, labelSpacing: 1.0, labelPos: 0.5, width: 60, wobble: 0.15, canal: false, smooth: true },
   road: { name: '', kind: 'avenue', width: 13, ruralOutside: true, gates: true, closed: false, smooth: true },
-  plaza: { name: '', radius: 22, monument: 'dot' },
+  plaza: { name: '', radius: 22, shape: 'round', aspect: 1, angle: 0, monument: 'dot' },
   building: { name: '', style: 'solid', smooth: false },
-  landmark: { name: 'Landmark', size: 6, showLabel: true, labelSize: 15, labelOffset: [0, -22] },
-  label: { text: 'Label', style: 'district', size: 30, angle: 0, spacing: 0.3, color: '' },
+  landmark: { name: 'Landmark', size: 6, showLabel: true, labelSize: 20, labelOffset: [0, -28] },
+  label: { text: 'Label', style: 'district', size: 40, angle: 0, spacing: 0.3, color: '' },
   compass: { size: 120 },
 };
 

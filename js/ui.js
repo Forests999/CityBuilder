@@ -13,6 +13,7 @@ export const SCHEMAS = {
     { k: 'towerSpacing', label: 'Tower spacing', t: 'range', min: 15, max: 300, step: 1 },
     { k: 'towerSize', label: 'Tower size', t: 'range', min: 0, max: 20, step: 0.5 },
     { k: 'cornerTowers', label: 'Towers at sharp corners', t: 'check' },
+    { k: 'closed', label: 'Closed loop', t: 'check', rebuild: true },
     { k: 'gates', label: 'Gates at roads', t: 'check' },
     { k: 'smooth', label: 'Smooth curve', t: 'check' },
   ],
@@ -47,6 +48,7 @@ export const SCHEMAS = {
     { t: 'heading', label: 'Tools' },
     { t: 'button', label: '✂ Split with a line', help: 'Draw a line across this district to break it into two.', action: (f, ctx) => ctx.startSplit(f) },
     { t: 'button', label: '🏰 Create wall around it', help: 'Adds a wall that traces this outline exactly and clips the district to it.', action: (f, ctx) => ctx.wallFromArea(f) },
+    { t: 'button', label: '🏰 Wall only free edges', help: 'Adds wall segments along the borders that do not touch another district.', action: (f, ctx) => ctx.wallFromFreeEdges(f) },
   ],
   farm: [
     label('name'),
@@ -99,7 +101,10 @@ export const SCHEMAS = {
   ],
   plaza: [
     label('name'),
-    { k: 'radius', label: 'Radius', t: 'range', min: 3, max: 200, step: 1 },
+    { k: 'shape', label: 'Shape', t: 'select', options: [['round', 'Round'], ['square', 'Square / rectangle']], rebuild: true },
+    { k: 'radius', label: 'Radius / half-size', t: 'range', min: 3, max: 200, step: 1 },
+    { k: 'aspect', label: 'Width ÷ height', t: 'range', min: 0.3, max: 3, step: 0.05, show: (f) => f.shape === 'square' },
+    { k: 'angle', label: 'Rotation', t: 'range', min: -90, max: 90, step: 1, show: (f) => f.shape === 'square' },
     { k: 'monument', label: 'Centerpiece', t: 'select', options: [['none', 'None'], ['dot', 'Statue (dot)'], ['ring', 'Ring'], ['fountain', 'Fountain'], ['obelisk', 'Obelisk'], ['tree', 'Tree / garden']] },
   ],
   building: [

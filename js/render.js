@@ -17,14 +17,26 @@ export function getColors(doc) {
   return c;
 }
 
-const CLOSED = { wall: 1, district: 1, farm: 1, water: 1, building: 1 };
+const CLOSED = { district: 1, farm: 1, water: 1, building: 1 };
 const POINT_TYPES = { plaza: 1, landmark: 1, label: 1, compass: 1 };
 const CARVERS = { road: 1, plaza: 1, river: 1, water: 1, wall: 1, building: 1 };
-export const isClosed = (f) => !!CLOSED[f.type] || (f.type === 'road' && !!f.closed);
+export const isClosed = (f) => (f.type === 'wall' ? f.closed !== false : !!CLOSED[f.type] || (f.type === 'road' && !!f.closed));
 export const isPointType = (f) => !!POINT_TYPES[f.type];
 
+// Closed walls only: open wall segments can't enclose or be followed by a district.
 export function findWalls(doc) {
-  return doc.features.filter((f) => f.type === 'wall' && !f.hidden && f.points.length >= 3);
+  return doc.features.filter((f) => f.type === 'wall' && !f.hidden && f.closed !== false && f.points.length >= 3);
+}
+
+// Corners of a square / rectangular plaza (grow expands it on every side).
+export function plazaCorners(p, grow = 0) {
+  const c = p.points[0], a = ((p.angle || 0) * Math.PI) / 180;
+  const hw = p.radius * (p.aspect || 1) + grow, hh = p.radius + grow;
+  return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map((q) => G.add(G.rotate(q, a), c));
+}
+function plazaPath(g, p, grow) {
+  if (p.shape === 'square') addPath(g, plazaCorners(p, grow), true);
+  else circle(g, p.points[0], p.radius + grow);
 }
 
 export function linkedWall(doc, f) {
@@ -239,23 +251,30 @@ function riverGeom(f, sh) {
 
 export function wallTowers(w, sh) {
   const out = [];
+  const closed = w.closed !== false;
   const step = Math.max(10, +w.towerSpacing || 60);
-  if (w.towerSize <= 0 || sh.length < 3) return out;
+  if (w.towerSize <= 0 || sh.length < (closed ? 3 : 2)) return out;
   if (w.cornerTowers !== false && !w.smooth) {
     const P = w.points, n = P.length;
     for (let i = 0; i < n; i++) {
-      const a = P[(i - 1 + n) % n], b = P[i], c = P[(i + 1) % n];
-      const d1 = G.norm(G.sub(b, a)), d2 = G.norm(G.sub(c, b));
-      const turn = Math.acos(Math.max(-1, Math.min(1, G.dot(d1, d2))));
-      if (turn < 0.45) continue;
+      const b = P[i];
+      // The two ends of an open wall always get a tower.
+      if (closed || (i > 0 && i < n - 1)) {
+        const a = P[(i - 1 + n) % n], c = P[(i + 1) % n];
+        const d1 = G.norm(G.sub(b, a)), d2 = G.norm(G.sub(c, b));
+        const turn = Math.acos(Math.max(-1, Math.min(1, G.dot(d1, d2))));
+        if (turn < 0.45) continue;
+      }
       if (out.some((t) => G.dist(t.p, b) < step * 0.5)) continue;
       out.push({ p: b, r: w.towerSize * 1.4 });
     }
   }
-  const ring = sh.concat([sh[0]]), cum = G.cumLengths(ring), L = cum[cum.length - 1];
+  const path = closed ? sh.concat([sh[0]]) : sh;
+  const cum = G.cumLengths(path), L = cum[cum.length - 1];
   const count = Math.max(1, Math.round(L / step)), real = L / count;
-  for (let i = 0; i < count; i++) {
-    const p = G.pointAt(ring, cum, i * real).p;
+  const upto = closed ? count : count + 1;
+  for (let i = 0; i < upto; i++) {
+    const p = G.pointAt(path, cum, i * real).p;
     if (out.some((t) => G.dist(t.p, p) < real * 0.6)) continue;
     out.push({ p, r: w.towerSize });
   }
@@ -263,34 +282,73 @@ export function wallTowers(w, sh) {
 }
 
 // ---------- feature painters ----------
-function drawWater(ctx, f, sh, C) {
+function drawWater(ctx, f, sh, C, riverPolys) {
   ctx.save();
   ctx.beginPath(); addPath(ctx, sh, true);
   ctx.fillStyle = C.water; ctx.fill();
   ctx.clip();
   ctx.globalAlpha = 0.45; ctx.fillStyle = ripplePattern(ctx, C.waterLine); ctx.fill(); ctx.globalAlpha = 1;
-  const gap = 9;
-  for (let i = f.coastLines; i >= 1; i--) {
-    ctx.beginPath(); addPath(ctx, sh, true);
-    ctx.strokeStyle = C.waterLine; ctx.lineWidth = 2 * i * gap + 1.2; ctx.stroke();
-    ctx.strokeStyle = C.water; ctx.lineWidth = 2 * i * gap - 1.2; ctx.stroke();
-  }
   ctx.restore();
-  ctx.beginPath(); addPath(ctx, sh, true);
-  ctx.strokeStyle = C.waterEdge; ctx.lineWidth = 2; ctx.stroke();
+  // Shore rings and the edge line go on their own layer so rivers can open into the
+  // lake: both are erased wherever a river's channel meets the shore.
+  const g = getLayer(2, ctx);
+  const gap = 9;
+  g.save();
+  g.beginPath(); addPath(g, sh, true); g.clip();
+  for (let i = f.coastLines; i >= 1; i--) {
+    g.beginPath(); addPath(g, sh, true);
+    g.strokeStyle = C.waterLine; g.lineWidth = 2 * i * gap + 1.2; g.stroke();
+    g.strokeStyle = C.water; g.lineWidth = 2 * i * gap - 1.2; g.stroke();
+  }
+  g.restore();
+  g.beginPath(); addPath(g, sh, true);
+  g.strokeStyle = C.waterEdge; g.lineWidth = 2; g.stroke();
+  if (riverPolys.length) {
+    g.globalCompositeOperation = 'destination-out';
+    g.fillStyle = '#000'; g.strokeStyle = '#000'; g.lineWidth = 3;
+    for (const poly of riverPolys) { g.beginPath(); addPath(g, poly, true); g.fill(); g.stroke(); }
+    g.globalCompositeOperation = 'source-over';
+  }
+  blit(ctx, g);
 }
 
-function drawRiver(ctx, f, sh, geo, C) {
+function drawRiver(target, f, sh, geo, C, lakes) {
   if (sh.length < 2) return;
   const { L, R, wl, wr, nrm, cum, poly } = geo;
+  // Drawn on a layer so the part inside any lake can be removed (the lake shows instead).
+  const ctx = lakes.length ? getLayer(2, target) : target;
   ctx.save();
   ctx.beginPath(); addPath(ctx, poly, true);
   ctx.fillStyle = C.water; ctx.fill();
   ctx.clip();
   ctx.strokeStyle = C.waterLine; ctx.lineWidth = 1;
   if (f.canal) {
-    ctx.setLineDash([10, 8]);
-    ctx.beginPath(); addPath(ctx, sh, false); ctx.stroke();
+    // Short, broken, slightly wavering ripple strokes at random depths in the channel.
+    const rnd = mulberry32(hashStr(f.id) ^ 0x51ab);
+    const nz = makeNoise(hashStr(f.id) ^ 0x2b7);
+    const total = cum[cum.length - 1], half = f.width / 2;
+    const lanes = Math.max(2, Math.round(f.width / 6));
+    ctx.lineCap = 'round';
+    for (let k = 0; k < lanes; k++) {
+      const lat0 = -0.7 + (1.4 * (k + 0.5)) / lanes + (rnd() - 0.5) * 0.3;
+      let s = rnd() * 30;
+      while (s < total) {
+        const len = 4 + rnd() * 16;
+        ctx.beginPath();
+        for (let u = 0; u <= len; u += 2.5) {
+          const at = G.pointAt(sh, cum, Math.min(total, s + u));
+          const nrmv = G.perp(at.dir);
+          const off = (lat0 + nz((s + u) / 18, k * 5.7) * 0.18) * half;
+          const x = at.p[0] + nrmv[0] * off, y = at.p[1] + nrmv[1] * off;
+          if (u) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        }
+        ctx.globalAlpha = 0.35 + rnd() * 0.55;
+        ctx.lineWidth = 0.7 + rnd() * 0.7;
+        ctx.stroke();
+        s += len + 6 + rnd() * 34;
+      }
+    }
+    ctx.globalAlpha = 1;
   } else {
     // Lines hug the banks and thin out toward the middle of the channel.
     const nz = makeNoise(hashStr(f.id) ^ 0x777);
@@ -322,6 +380,13 @@ function drawRiver(ctx, f, sh, geo, C) {
   ctx.restore();
   ctx.beginPath(); addPath(ctx, L, false); addPath(ctx, R, false);
   ctx.strokeStyle = C.waterEdge; ctx.lineWidth = f.canal ? 2.4 : 1.8; ctx.stroke();
+  if (ctx !== target) {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fillStyle = '#000';
+    for (const lake of lakes) { ctx.beginPath(); addPath(ctx, lake, true); ctx.fill(); }
+    ctx.globalCompositeOperation = 'source-over';
+    blit(target, ctx);
+  }
 }
 
 function drawMonument(ctx, p, C, S) {
@@ -410,7 +475,8 @@ export function renderMap(ctx, doc, o) {
   const feats = doc.features.filter((f) => !f.hidden);
   const shape = new Map();
   for (const f of feats) shape.set(f.id, featureShape(f, doc));
-  const walls = feats.filter((f) => f.type === 'wall' && shape.get(f.id).length >= 3);
+  // `walls` = closed walls (they can enclose, clip and be followed); open wall segments are drawn but do none of that.
+  const walls = feats.filter((f) => f.type === 'wall' && f.closed !== false && shape.get(f.id).length >= 3);
   const center = walls.length ? G.centroid(shape.get(walls[0].id)) : [W / 2, H / 2];
   const ow = S.outline, gap = +S.featureGap || 0;
   const haloK = S.haloWidth == null ? 0.34 : +S.haloWidth;
@@ -424,6 +490,10 @@ export function renderMap(ctx, doc, o) {
   };
   const riverCache = new Map();
   const riverGeo = (f) => { if (!riverCache.has(f.id)) riverCache.set(f.id, riverGeom(f, shape.get(f.id))); return riverCache.get(f.id); };
+  let riverPolysCache = null;
+  const riverPolys = () => riverPolysCache || (riverPolysCache = feats.filter((f) => f.type === 'river' && shape.get(f.id).length >= 2).map((f) => riverGeo(f).poly));
+  // Slightly inset so a river's fill overlaps the lake's fill by a hair (no antialiasing line where they meet).
+  const lakeShapes = feats.filter((f) => f.type === 'water' && shape.get(f.id).length >= 3).map((f) => G.inflatePoly(shape.get(f.id), -1));
   const towerCache = new Map();
   const towers = (w) => { if (!towerCache.has(w.id)) towerCache.set(w.id, wallTowers(w, shape.get(w.id))); return towerCache.get(w.id); };
   const cityRoadsAll = feats.filter((f) => f.type === 'road' && f.kind !== 'rural' && shape.get(f.id).length >= 2);
@@ -446,7 +516,7 @@ export function renderMap(ctx, doc, o) {
         if (cl) g.restore();
       } else if (f.type === 'plaza') {
         if (!f.points[0]) continue;
-        g.beginPath(); circle(g, f.points[0], f.radius + ex); g.fill();
+        g.beginPath(); plazaPath(g, f, ex); g.fill();
       } else if (f.type === 'river') {
         if (sh.length < 2) continue;
         g.beginPath(); addPath(g, riverGeo(f).poly, true); g.fill();
@@ -456,8 +526,8 @@ export function renderMap(ctx, doc, o) {
         g.beginPath(); addPath(g, sh, true); g.fill();
         g.lineWidth = 2 * (gap + ex); g.stroke();
       } else if (f.type === 'wall') {
-        if (sh.length < 3) continue;
-        g.beginPath(); addPath(g, sh, true);
+        if (sh.length < (f.closed === false ? 2 : 3)) continue;
+        g.beginPath(); addPath(g, sh, f.closed !== false);
         g.lineWidth = f.width + 2 * (gap + ex); g.stroke();
         g.beginPath();
         for (const t of towers(f)) circle(g, t.p, t.r + gap + ex);
@@ -469,6 +539,8 @@ export function renderMap(ctx, doc, o) {
 
   function drawDistrictRun(run, above) {
     const items = run.map((d) => ({ d, sh: shape.get(d.id), clip: clipFor(d) })).filter((x) => x.sh.length >= 3);
+    // Clip with a hair-wider outline so abutting districts overlap slightly and no antialiasing seam shows between them.
+    for (const x of items) x.cs = G.inflatePoly(x.sh, 0.9);
     if (!items.length) return;
     for (const x of items) x.g = districtGen(x.d, x.sh, center);
     const within = (g, x, fn) => { g.save(); if (x.clip) x.clip(g); fn(); g.restore(); };
@@ -481,7 +553,17 @@ export function renderMap(ctx, doc, o) {
     }
     // Outer edge outline (only its outside half survives), then the street-colored ground.
     for (const x of items) within(ctx, x, () => { ctx.beginPath(); addPath(ctx, x.sh, true); ctx.strokeStyle = C.outline; ctx.lineWidth = ow * 2; ctx.stroke(); });
-    for (const x of items) within(ctx, x, () => { ctx.beginPath(); addPath(ctx, x.sh, true); ctx.fillStyle = C.street; ctx.fill(); });
+    // One fill per wall-clip group, so neighbouring districts form a single shape with no hairline between them.
+    const groups = new Map();
+    for (const x of items) { const key = String(x.d.clipWall || ''); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(x); }
+    for (const list of groups.values()) {
+      ctx.save();
+      if (list[0].clip) list[0].clip(ctx);
+      ctx.beginPath();
+      for (const x of list) addPath(ctx, x.cs, true);
+      ctx.fillStyle = C.street; ctx.fill();
+      ctx.restore();
+    }
 
     const carvers = above.filter((f) => CARVERS[f.type]);
     for (const ex of [0, ow]) {
@@ -489,7 +571,7 @@ export function renderMap(ctx, doc, o) {
       const g = getLayer(0, ctx);
       for (const x of items) {
         within(g, x, () => {
-          g.beginPath(); addPath(g, x.sh, true); g.clip();
+          g.beginPath(); addPath(g, x.cs, true); g.clip();
           if (!block) { g.fillStyle = C.outline; g.fill(); }
           else {
             g.fillStyle = x.d.color || toneColor(C, x.d.tone); g.fill();
@@ -560,7 +642,7 @@ export function renderMap(ctx, doc, o) {
       g.strokeStyle = C.outline; g.fillStyle = C.outline;
       strokeRoads(g, city, ow * 2);
       g.beginPath();
-      for (const p of plazas) circle(g, p.points[0], p.radius + ow);
+      for (const p of plazas) plazaPath(g, p, ow);
       g.fill();
     };
     if (!districts.length) lines(ctx, true);
@@ -590,7 +672,7 @@ export function renderMap(ctx, doc, o) {
     ctx.strokeStyle = C.street; ctx.fillStyle = C.street;
     strokeRoads(ctx, city, 0);
     ctx.beginPath();
-    for (const p of plazas) circle(ctx, p.points[0], p.radius);
+    for (const p of plazas) plazaPath(ctx, p, 0);
     ctx.fill();
     for (const p of plazas) drawMonument(ctx, p, C, S);
   }
@@ -640,7 +722,8 @@ export function renderMap(ctx, doc, o) {
 
   function drawWall(w) {
     const sh = shape.get(w.id);
-    ctx.beginPath(); addPath(ctx, sh, true);
+    const wClosed = w.closed !== false;
+    ctx.beginPath(); addPath(ctx, sh, wClosed);
     ctx.strokeStyle = C.wall; ctx.lineWidth = w.width; ctx.stroke();
     ctx.beginPath();
     for (const t of towers(w)) circle(ctx, t.p, t.r);
@@ -648,7 +731,7 @@ export function renderMap(ctx, doc, o) {
     if (!w.gates) return;
     for (const r of cityRoadsAll) {
       if (!r.gates) continue;
-      for (const x of G.pathIntersections(shape.get(r.id), r.closed, sh, true)) {
+      for (const x of G.pathIntersections(shape.get(r.id), r.closed, sh, wClosed)) {
         const L = w.width + w.towerSize * 2 + 4;
         const a = G.sub(x.p, G.scale(x.dirA, L)), b = G.add(x.p, G.scale(x.dirA, L));
         ctx.lineCap = 'butt';
@@ -673,8 +756,8 @@ export function renderMap(ctx, doc, o) {
     const sh = shape.get(f.id);
     switch (f.type) {
       case 'farm': drawFarm(f, sh); break;
-      case 'water': if (sh.length >= 3) drawWater(ctx, f, sh, C); break;
-      case 'river': if (sh.length >= 2) drawRiver(ctx, f, sh, riverGeo(f), C); break;
+      case 'water': if (sh.length >= 3) drawWater(ctx, f, sh, C, riverPolys()); break;
+      case 'river': if (sh.length >= 2) drawRiver(ctx, f, sh, riverGeo(f), C, lakeShapes); break;
       case 'building':
         if (sh.length < 3) break;
         ctx.beginPath(); addPath(ctx, sh, true);
@@ -682,7 +765,7 @@ export function renderMap(ctx, doc, o) {
         ctx.fill();
         ctx.strokeStyle = C.outline; ctx.lineWidth = ow * 1.3; ctx.stroke();
         break;
-      case 'wall': if (sh.length >= 3) drawWall(f); break;
+      case 'wall': if (sh.length >= (f.closed === false ? 2 : 3)) drawWall(f); break;
       case 'landmark': {
         const c = f.points[0];
         if (!c) break;

@@ -203,3 +203,42 @@ export function splitConvex(poly, p, n) {
   if (cut.length < 2 || A.length < 3 || B.length < 3) return null;
   return [A, B, cut[0], cut[1]];
 }
+
+// Ramer-Douglas-Peucker simplification of an open path.
+export function simplifyPath(pts, eps) {
+  if (pts.length < 3) return pts.map((p) => p.slice());
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    let md = 0, mi = -1;
+    for (let i = a + 1; i < b; i++) {
+      const d = projSeg(pts[i], pts[a], pts[b]).d;
+      if (d > md) { md = d; mi = i; }
+    }
+    if (md > eps && mi > 0) { keep[mi] = 1; stack.push([a, mi], [mi, b]); }
+  }
+  return pts.filter((_, i) => keep[i]).map((p) => p.slice());
+}
+
+// Push a closed polygon's outline outward by d (mitered, limited). Used to make
+// neighbouring districts overlap by a hair so no antialiasing seam shows between them.
+export function inflatePoly(poly, d) {
+  const n = poly.length;
+  if (n < 3) return poly;
+  const sgn = polyArea(poly) >= 0 ? 1 : -1;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = poly[(i - 1 + n) % n], b = poly[i], c = poly[(i + 1) % n];
+    const e1 = norm(sub(b, a)), e2 = norm(sub(c, b));
+    const n1 = [e1[1] * sgn, -e1[0] * sgn], n2 = [e2[1] * sgn, -e2[0] * sgn];
+    let m = [n1[0] + n2[0], n1[1] + n2[1]];
+    const l = Math.hypot(m[0], m[1]);
+    if (l < 1e-6) { out.push([b[0] + n1[0] * d, b[1] + n1[1] * d]); continue; }
+    m = [m[0] / l, m[1] / l];
+    const k = Math.min(2.5, 1 / Math.max(0.2, m[0] * n1[0] + m[1] * n1[1]));
+    out.push([b[0] + m[0] * d * k, b[1] + m[1] * d * k]);
+  }
+  return out;
+}

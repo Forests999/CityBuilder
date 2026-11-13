@@ -2,7 +2,7 @@
 
 import * as S from './state.js';
 import * as G from './geom.js';
-import { renderMap, featureShape, isClosed, isPointType, getColors, findWalls } from './render.js';
+import { renderMap, releaseLayers, plazaCorners, featureShape, isClosed, isPointType, getColors, findWalls } from './render.js';
 import { SCHEMAS, buildForm, el } from './ui.js';
 import { randomCity } from './starter.js';
 import { THEMES, COLOR_KEYS, FONTS } from './themes.js';
@@ -27,6 +27,7 @@ const ICON = {
   street: '<path d="M4 18c5-1 6-8 16-12"/>',
   rural: '<path d="M3 19L21 5" stroke-dasharray="3 2.5"/>',
   plaza: '<circle cx="12" cy="12" r="5"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
+  plazaSq: '<rect x="7" y="7" width="10" height="10"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
   building: '<path d="M5 7h9v4h5v8H5z"/>',
   landmark: '<circle cx="12" cy="9" r="3.5"/><path d="M12 13v8"/>',
   label: '<path d="M5 5h14M12 5v14M9 19h6"/>',
@@ -47,7 +48,8 @@ const TOOLS = [
   { id: 'road', key: 'r', type: 'road', draw: 'line', label: 'Avenue', extra: { kind: 'avenue', width: 13 }, hint: 'Click points along the avenue; it snaps to plazas and other roads (hold Alt to not snap) · double-click to finish' },
   { id: 'street', key: 's', type: 'road', draw: 'line', label: 'Street', extra: { kind: 'street', width: 6, ruralOutside: false }, hint: 'Draw a hand-placed street · double-click to finish' },
   { id: 'rural', key: 'u', type: 'road', draw: 'line', label: 'Country road', extra: { kind: 'rural', width: 6 }, hint: 'Thin road through the countryside · double-click to finish' },
-  { id: 'plaza', key: 'p', type: 'plaza', draw: 'point', label: 'Plaza', hint: 'Click to place a round plaza' },
+  { id: 'plaza', key: 'p', type: 'plaza', draw: 'point', label: 'Round plaza', hint: 'Click to place a round plaza' },
+  { id: 'plazaSq', key: 'q', type: 'plaza', draw: 'point', label: 'Square plaza', extra: { shape: 'square', radius: 28, monument: 'none' }, hint: 'Click to place a square plaza; set rotation and proportions in the panel' },
   { id: 'building', key: 'b', type: 'building', draw: 'poly', label: 'Building / keep', hint: 'Outline a large building, keep or monument · double-click to finish' },
   { id: 'landmark', key: 'l', type: 'landmark', draw: 'point', label: 'Landmark', hint: 'Click to place a labelled landmark dot' },
   { id: 'label', key: 't', type: 'label', draw: 'point', label: 'Text label', hint: 'Click to place a label, then type its text in the panel' },
@@ -112,7 +114,7 @@ function strokeScreen(pts, closed, color, width, dash) {
 
 function outlineOf(f) {
   const doc = S.getDoc();
-  if (f.type === 'plaza') return circlePts(f.points[0], f.radius + 4);
+  if (f.type === 'plaza') return f.shape === 'square' ? plazaCorners(f, 4) : circlePts(f.points[0], f.radius + 4);
   if (f.type === 'landmark') return circlePts(f.points[0], f.size + 6);
   if (f.type === 'compass') return circlePts(f.points[0], f.size);
   if (f.type === 'label') { const h = app.hits.find((x) => x.id === f.id); return h ? h.poly : circlePts(f.points[0], 10); }
@@ -175,7 +177,7 @@ function hitTest(w) {
   for (const f of fs) {
     const p = f.points[0];
     if (!p) continue;
-    if ((f.type === 'landmark' && G.dist(w, p) < f.size + tol) || (f.type === 'plaza' && G.dist(w, p) < f.radius + tol) ||
+    if ((f.type === 'landmark' && G.dist(w, p) < f.size + tol) || (f.type === 'plaza' && (f.shape === 'square' ? G.pointInPoly(w, plazaCorners(f, tol)) : G.dist(w, p) < f.radius + tol)) ||
         (f.type === 'compass' && G.dist(w, p) < f.size)) out.push({ id: f.id, kind: 'move' });
   }
   for (const f of fs) {
@@ -288,11 +290,16 @@ function splitAreas(line, targetId) {
     : doc.features.filter((f) => (f.type === 'district' || f.type === 'farm') && !f.hidden);
   let made = null, count = 0;
   for (const f of targets) {
-    const P = f.followWall ? (doc.features.find((w) => w.id === f.followWall) || {}).points : f.points;
+    // Split the outline as it is actually drawn (a smoothed or wall-following shape is not its raw points),
+    // so the two pieces fit the original edge exactly and meet each other along the cut with no gap.
+    const exact = !!(f.followWall || f.smooth);
+    const P = exact ? featureShape(f, doc) : f.points;
     if (!P || P.length < 3) continue;
-    const parts = splitPolygon(P, line);
+    let parts = splitPolygon(P, line);
     if (!parts) continue;
+    if (exact) parts = parts.map((p) => G.simplifyPath(p, 0.7));
     if (f.followWall) { if (!f.clipWall) f.clipWall = f.followWall; f.followWall = ''; }
+    if (exact) f.smooth = false;
     f.points = parts[0];
     f.locked = false;
     const c = JSON.parse(JSON.stringify(f));
@@ -343,7 +350,7 @@ function duplicateSelected() {
 
 const ctxHelpers = {
   wallOptions() {
-    return S.getDoc().features.filter((f) => f.type === 'wall').map((w, i) => [w.id, w.name || `Wall ${i + 1}`]);
+    return S.getDoc().features.filter((f) => f.type === 'wall' && f.closed !== false).map((w, i) => [w.id, w.name || `Wall ${i + 1}`]);
   },
   unlinkWall(f, prev) {
     if (!f.followWall && f.points.length < 3) {
@@ -355,6 +362,43 @@ const ctxHelpers = {
     setTool('split');
     app.splitTarget = f.id;
     toast('Draw a line across the area, then double-click (or press Enter).');
+  },
+  // Wall only along the borders that don't touch another district (open wall segments).
+  wallFromFreeEdges(f) {
+    const doc = S.getDoc();
+    const own = featureShape(f, doc);
+    if (own.length < 3) return;
+    const P = G.densify(own, true, 4), n = P.length;
+    const others = doc.features.filter((o) => o !== f && o.type === 'district' && !o.hidden).map((o) => featureShape(o, doc)).filter((s) => s.length >= 3);
+    const tol = 3;
+    const exposed = P.map((p, i) => {
+      const m = G.lerp(p, P[(i + 1) % n], 0.5);
+      return !others.some((s) => G.pointInPoly(m, s) || G.nearestOnPath(m, s, true).d < tol);
+    });
+    if (!exposed.some(Boolean)) { toast('Every edge of this district touches another district, so there is nothing to wall.'); return; }
+    if (exposed.every(Boolean)) { ctxHelpers.wallFromArea(f); return; }
+    // Start walking from a shared edge so no run wraps around the start of the list.
+    const start = exposed.findIndex((e) => !e);
+    const runs = [];
+    let cur = null;
+    for (let k = 0; k < n; k++) {
+      const i = (start + k) % n;
+      if (exposed[i]) { if (!cur) cur = [P[i]]; cur.push(P[(i + 1) % n]); }
+      else if (cur) { runs.push(cur); cur = null; }
+    }
+    if (cur) runs.push(cur);
+    let last = null, made = 0;
+    for (const run of runs) {
+      const pts = G.simplifyPath(run, 1.2);
+      if (G.cumLengths(pts).pop() < 20) continue;
+      last = S.createFeature('wall', pts, { name: (f.name || 'District') + ' Wall', closed: false });
+      S.insertFeature(last);
+      made++;
+    }
+    if (!made) return;
+    app.sel = last.id;
+    S.commit();
+    toast(`Added ${made} wall segment${made > 1 ? 's' : ''} along the free edges.`);
   },
   wallFromArea(f) {
     const doc = S.getDoc();
@@ -743,6 +787,7 @@ function exportPNG() {
   c.width = Math.round(doc.meta.width * k); c.height = Math.round(doc.meta.height * k);
   const g = c.getContext('2d');
   renderMap(g, doc, { s: k, ox: 0, oy: 0, dpr: 1 });
+  releaseLayers();
   c.toBlob((b) => (b ? download(b, slug() + '.png') : toast('Image too large for this browser — try a smaller scale.')), 'image/png');
 }
 
