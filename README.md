@@ -111,3 +111,11 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 - **Top bar:** File menu (new, generate, open, save, export), undo/redo/fit, Snap, ✨ Generate, Export PNG.
 - **Toolbar:** six groups (select, areas, lines & walls, places, text & compass, edit). Click a group for its current tool; use the corner arrow or right-click for the rest.
 - **Right panel:** *Edit* (properties of the selection, in collapsible sections whose open/closed state is remembered), *Layers*, *Generate* (city wizard and kits) and *Map* (page, theme, decoration, colors, tracing image).
+
+## Roads, lines and estimates
+
+- **Gates:** where a gated road crosses a wall, the passage is cut straight through the wall along the road, with its ends flush against the wall's faces and a tower on each side.
+- **Adding nodes to lines:** a selected road, wall, river or outline shows round **+** handles at the middle of each segment (on the curve itself for smoothed lines). Drag one to insert a node and move it in one gesture. Ctrl-click anywhere on the selected line also adds a node there, and double-clicking any line adds one without selecting it first.
+- **White gap:** buildings, lakes, rivers, walls and cut-aways each have a *White gap around it* setting (or *map default*). Set it to 0 to let blocks run right up to the shape's outline.
+- **Roads and districts:** each road has *Shape the districts around it*. Turn it off and the road is simply drawn over the districts, leaving their blocks and streets untouched.
+- **Population estimate (top bar):** a rough figure from the blocks the street generator actually produces: built-up area (blocks minus half a street width) × people per hectare × a style factor (dense slums higher, noble estates and industry lower, parks and cemeteries zero) × the district's *Population weight*. Click it to set the density and the real-world scale of a map unit, and to see each district's share.

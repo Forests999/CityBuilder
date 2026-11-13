@@ -19,12 +19,12 @@ export function sortByDefaultOrder(features) {
 }
 
 export const DEFAULTS = {
-  wall: { name: 'City Wall', closed: true, width: 7, towerSpacing: 60, towerSize: 5, cornerTowers: true, smooth: false, gates: true },
+  wall: { name: 'City Wall', gap: null, closed: true, width: 7, towerSpacing: 60, towerSize: 5, cornerTowers: true, smooth: false, gates: true },
   district: {
     name: 'New District', showLabel: true, labelSize: 42, labelAngle: 0, labelSpacing: 0.12, labelOffset: [0, 0], halo: null,
     preset: 'standard', ...PRESETS.standard, gridAngle: 0, color: '', borderStreet: 3,
     treeSpacing: 15, treeDensity: 0.55, graveSpacing: 8, alignRoads: true,
-    gradMode: 'none', gradStrength: 0.6, gradCenter: null, gradRadius: 0,
+    gradMode: 'none', gradStrength: 0.6, gradCenter: null, gradRadius: 0, popFactor: 1,
     smooth: false, followWall: '', clipWall: '', seed: 1,
   },
   cutout: { name: '', fill: 'none', gap: 0, smooth: false },
@@ -33,12 +33,12 @@ export const DEFAULTS = {
     parcelSize: 110, pattern: 'organic', irregularity: 0.6, warp: 6, gridAngle: 0,
     furrows: true, furrowSpacing: 6, hedges: true, smooth: false, clipWall: '', seed: 1,
   },
-  water: { name: '', showLabel: false, labelSize: 48, labelAngle: 0, labelSpacing: 0.25, labelOffset: [0, 0], halo: null, coastLines: 3, smooth: true },
-  river: { name: 'River', showLabel: true, labelSize: 34, labelSpacing: 1.0, labelPos: 0.5, labelOpacity: 0.7, halo: null, width: 60, wobble: 0.15, canal: false, smooth: true },
-  road: { name: '', kind: 'avenue', width: 13, ruralOutside: true, gates: true, closed: false, smooth: true },
+  water: { name: '', showLabel: false, labelSize: 48, labelAngle: 0, labelSpacing: 0.25, labelOffset: [0, 0], halo: null, coastLines: 3, gap: null, smooth: true },
+  river: { name: 'River', showLabel: true, labelSize: 34, labelSpacing: 1.0, labelPos: 0.5, labelOpacity: 0.7, halo: null, width: 60, wobble: 0.15, canal: false, gap: null, smooth: true },
+  road: { name: '', kind: 'avenue', width: 13, ruralOutside: true, gates: true, closed: false, carve: true, smooth: true },
   plaza: { name: '', radius: 22, shape: 'round', aspect: 1, angle: 0, monument: 'dot' },
   building: {
-    name: '', style: 'solid', tone: 'normal', hatch: true, color: '', smooth: false,
+    name: '', style: 'solid', tone: 'normal', hatch: true, color: '', gap: null, smooth: false,
     shape: 'free', size: 24, aspect: 1.5, inner: 0.45, angle: 0,
   },
   landmark: { name: 'Landmark', size: 6, showLabel: true, labelSize: 20, labelOffset: [0, -28], halo: null },
@@ -49,7 +49,7 @@ export const DEFAULTS = {
 export function defaultSettings() {
   return {
     theme: 'patina', colors: {}, frame: true, frameStyle: 'solid', frameWidth: 30, fields: true, fieldSize: 170,
-    hatch: true, hatchSpacing: 3.6, outline: 1.2, glow: true, glowSize: 40, featureGap: 4, haloWidth: 0.34,
+    hatch: true, hatchSpacing: 3.6, outline: 1.2, glow: true, glowSize: 40, featureGap: 4, haloWidth: 0.34, popDensity: 150, metersPerUnit: 1,
     fontLabel: 'Cinzel', fontTitle: 'Oswald', fontScript: 'IM Fell English', seed: 1,
   };
 }

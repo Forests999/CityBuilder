@@ -266,7 +266,7 @@ function drawGraves(g, graves, C, S) {
   g.strokeStyle = C.outline; g.globalAlpha = 0.8; g.lineWidth = Math.max(0.5, S.outline * 0.55); g.stroke(); g.globalAlpha = 1;
 }
 
-function riverGeom(f, sh) {
+export function riverGeom(f, sh) {
   const nrm = G.pathNormals(sh, false), cum = G.cumLengths(sh);
   const nz = makeNoise(hashStr(f.id));
   const rough = makeNoise(hashStr(f.id) ^ 0x1234567);
@@ -595,6 +595,7 @@ function drawFrame(ctx, W, H, C, S) {
 // ---------- main entry ----------
 // o: { s, ox, oy, dpr, hits?: [], ref?: {img, opacity, ...} }
 export function renderMap(ctx, doc, o) {
+  if (!ctx.canvas.width || !ctx.canvas.height) return;   // not laid out yet
   const C = getColors(doc), S = doc.settings, W = doc.meta.width, H = doc.meta.height;
   const k = o.s * o.dpr;
   ctx.setTransform(k, 0, 0, k, o.ox * o.dpr, o.oy * o.dpr);
@@ -622,7 +623,7 @@ export function renderMap(ctx, doc, o) {
   // Roads and rivers that nearby generated streets line up with.
   let guidesCache = null;
   const getGuides = () => guidesCache || (guidesCache = prepGuides(
-    feats.filter((f) => (f.type === 'road' && f.kind !== 'rural') || f.type === 'river').map((f) => shape.get(f.id)).filter((s) => s.length >= 2)));
+    feats.filter((f) => (f.type === 'road' && f.kind !== 'rural' && f.carve !== false) || f.type === 'river').map((f) => shape.get(f.id)).filter((s) => s.length >= 2)));
   let riverPolysCache = null;
   const riverPolys = () => riverPolysCache || (riverPolysCache = feats.filter((f) => f.type === 'river' && shape.get(f.id).length >= 2).map((f) => riverGeo(f).poly));
   // Slightly inset so a river's fill overlaps the lake's fill by a hair (no antialiasing line where they meet).
@@ -653,18 +654,19 @@ export function renderMap(ctx, doc, o) {
       } else if (f.type === 'river') {
         if (sh.length < 2) continue;
         g.beginPath(); addPath(g, riverGeo(f).poly, true); g.fill();
-        if (gap + ex > 0) { g.lineWidth = 2 * (gap + ex); g.stroke(); }
+        { const gr = f.gap == null ? gap : +f.gap; if (gr + ex > 0) { g.lineWidth = 2 * (gr + ex); g.stroke(); } }
       } else if (f.type === 'water' || f.type === 'building' || f.type === 'cutout') {
         if (sh.length < 3) continue;
-        const gp = f.type === 'cutout' ? +f.gap || 0 : gap;
+        const gp = f.type === 'cutout' ? +f.gap || 0 : (f.gap == null ? gap : +f.gap);
         g.beginPath(); addPath(g, sh, true); g.fill();
         if (gp + ex > 0) { g.lineWidth = 2 * (gp + ex); g.stroke(); }
       } else if (f.type === 'wall') {
         if (sh.length < (f.closed === false ? 2 : 3)) continue;
         g.beginPath(); addPath(g, sh, f.closed !== false);
-        g.lineWidth = f.width + 2 * (gap + ex); g.stroke();
+        const gw = f.gap == null ? gap : +f.gap;
+        g.lineWidth = f.width + 2 * (gw + ex); g.stroke();
         g.beginPath();
-        for (const t of towers(f)) circle(g, t.p, t.r + gap + ex);
+        for (const t of towers(f)) circle(g, t.p, t.r + gw + ex);
         g.fill();
       }
     }
@@ -689,7 +691,7 @@ export function renderMap(ctx, doc, o) {
     for (const x of items) within(ctx, x, () => { ctx.beginPath(); addPath(ctx, x.sh, true); ctx.strokeStyle = C.outline; ctx.lineWidth = ow * 2; ctx.stroke(); });
     // One fill per wall-clip group, so neighbouring districts form a single shape with no hairline between them.
     // Cut-aways above the districts are erased from it so the hole really is open.
-    const carvers = above.filter((f) => CARVERS[f.type]);
+    const carvers = above.filter((f) => CARVERS[f.type] && !(f.type === 'road' && f.carve === false));
     const cutouts = carvers.filter((f) => f.type === 'cutout' && shape.get(f.id).length >= 3);
     const groups = new Map();
     for (const x of items) { const key = String(x.d.clipWall || ''); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(x); }
@@ -762,6 +764,7 @@ export function renderMap(ctx, doc, o) {
   function drawRoadRun(run, below) {
     const roads = run.filter((r) => r.type === 'road' && shape.get(r.id).length >= 2);
     const city = roads.filter((r) => r.kind !== 'rural');
+    const masked = city.filter((r) => r.carve !== false), free = city.filter((r) => r.carve === false);
     const plazas = run.filter((p) => p.type === 'plaza' && p.points.length);
     const districts = below.filter((f) => f.type === 'district' && shape.get(f.id).length >= 3);
     const lastD = below.map((f) => f.type).lastIndexOf('district');
@@ -787,7 +790,7 @@ export function renderMap(ctx, doc, o) {
         }
       }
       g.strokeStyle = C.outline; g.fillStyle = C.outline;
-      strokeRoads(g, city, ow * 2);
+      strokeRoads(g, masked, ow * 2);
       g.beginPath();
       for (const p of plazas) plazaPath(g, p, ow);
       g.fill();
@@ -816,6 +819,8 @@ export function renderMap(ctx, doc, o) {
         blit(ctx, g2);
       }
     }
+    // Roads set to leave the districts alone are drawn over them with their own outline.
+    if (free.length) { ctx.strokeStyle = C.outline; strokeRoads(ctx, free, ow * 2); }
     ctx.strokeStyle = C.street; ctx.fillStyle = C.street;
     strokeRoads(ctx, city, 0);
     ctx.beginPath();
@@ -870,36 +875,58 @@ export function renderMap(ctx, doc, o) {
   function drawWall(w) {
     const sh = shape.get(w.id);
     const wClosed = w.closed !== false;
-    ctx.beginPath(); addPath(ctx, sh, wClosed);
-    ctx.strokeStyle = C.wall; ctx.lineWidth = w.width; ctx.stroke();
-    ctx.beginPath();
-    for (const t of towers(w)) circle(ctx, t.p, t.r);
-    ctx.fillStyle = C.wall; ctx.fill();
-    if (!w.gates) return;
-    for (const r of cityRoadsAll) {
-      if (!r.gates) continue;
-      for (const x of G.pathIntersections(shape.get(r.id), r.closed, sh, wClosed)) {
-        // The opening spans exactly the wall's thickness measured along the road, so the gate stub
-        // neither pokes out of the wall nor leaves a sliver of wall across the road, even when the road
-        // crosses at an angle.
-        const sinT = Math.max(0.35, Math.abs(x.dirA[0] * x.dirB[1] - x.dirA[1] * x.dirB[0]));
-        const L = (w.width / 2 + 1.5) / sinT;
-        const a = G.sub(x.p, G.scale(x.dirA, L)), b = G.add(x.p, G.scale(x.dirA, L));
-        ctx.lineCap = 'butt';
-        for (const pass of [0, 1]) {
-          ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
-          ctx.strokeStyle = pass ? C.street : C.outline;
-          ctx.lineWidth = pass ? r.width : r.width + ow * 2;
-          ctx.stroke();
+    // Gates: where a gated road crosses this wall.
+    const gates = [];
+    if (w.gates) {
+      for (const r of cityRoadsAll) {
+        if (!r.gates) continue;
+        for (const x of G.pathIntersections(shape.get(r.id), r.closed, sh, wClosed)) {
+          const sinT = Math.max(0.35, Math.abs(x.dirA[0] * x.dirB[1] - x.dirA[1] * x.dirB[0]));
+          gates.push({ r, x, sinT, half: r.width / 2 / sinT });
         }
-        ctx.lineCap = 'round';
-        const ts = Math.max(4, w.width * 0.75, w.towerSize * 1.3), off = r.width / 2 / sinT + ts * 0.8;
-        ctx.beginPath();
-        circle(ctx, G.add(x.p, G.scale(x.dirB, off)), ts);
-        circle(ctx, G.sub(x.p, G.scale(x.dirB, off)), ts);
-        ctx.fillStyle = C.wall; ctx.fill();
       }
     }
+    // Towers, minus any that would stand in a gate opening.
+    const tw = towers(w).filter((t) => !gates.some((g) => G.dist(t.p, g.x.p) < g.half + t.r));
+    const strokeWall = (g) => { g.beginPath(); addPath(g, sh, wClosed); g.lineWidth = w.width; g.stroke(); };
+    if (!gates.length) {
+      ctx.strokeStyle = C.wall; strokeWall(ctx);
+      ctx.beginPath(); for (const t of tw) circle(ctx, t.p, t.r);
+      ctx.fillStyle = C.wall; ctx.fill();
+      return;
+    }
+    // The wall is drawn on a layer and each gate is cut straight through it along the road, so the
+    // opening's sides run parallel to the road and its ends are flush with the wall's own faces.
+    const seg = (g, x, sinT, len) => {
+      const L = (w.width / 2 + len) / sinT;
+      const a = G.sub(x.p, G.scale(x.dirA, L)), b = G.add(x.p, G.scale(x.dirA, L));
+      g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]);
+    };
+    const wl = getLayer(2, ctx);
+    wl.strokeStyle = C.wall; strokeWall(wl);
+    wl.beginPath(); for (const t of tw) circle(wl, t.p, t.r);
+    wl.fillStyle = C.wall; wl.fill();
+    wl.globalCompositeOperation = 'destination-out'; wl.lineCap = 'butt'; wl.strokeStyle = '#000';
+    for (const { r, x, sinT } of gates) { seg(wl, x, sinT, 3); wl.lineWidth = r.width + ow * 2; wl.stroke(); }
+    wl.globalCompositeOperation = 'source-over'; wl.lineCap = 'round';
+    blit(ctx, wl);
+    // Passage floor with its two outline edges, kept to the wall's thickness.
+    const gl = getLayer(2, ctx);
+    gl.lineCap = 'butt';
+    for (const { r, x, sinT } of gates) { seg(gl, x, sinT, 12); gl.strokeStyle = C.outline; gl.lineWidth = r.width + ow * 2; gl.stroke(); }
+    for (const { r, x, sinT } of gates) { seg(gl, x, sinT, 12); gl.strokeStyle = C.street; gl.lineWidth = r.width; gl.stroke(); }
+    gl.globalCompositeOperation = 'destination-in';
+    gl.strokeStyle = '#000'; strokeWall(gl);
+    gl.globalCompositeOperation = 'source-over'; gl.lineCap = 'round';
+    blit(ctx, gl);
+    // Gate towers flanking each opening.
+    ctx.beginPath();
+    for (const { x, half } of gates) {
+      const ts = Math.max(4, w.width * 0.75, w.towerSize * 1.3), off = half + ts * 0.85;
+      circle(ctx, G.add(x.p, G.scale(x.dirB, off)), ts);
+      circle(ctx, G.sub(x.p, G.scale(x.dirB, off)), ts);
+    }
+    ctx.fillStyle = C.wall; ctx.fill();
   }
 
   const fam = (key) => S[key] || 'Cinzel';

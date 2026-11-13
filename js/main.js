@@ -11,6 +11,7 @@ import * as SN from './snap.js';
 import { KITS, defaultKitState } from './kits.js';
 import { makeRng } from './rng.js';
 import { PRESETS } from './generate.js';
+import { estimatePopulation, formatPop } from './population.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#map');
@@ -241,6 +242,15 @@ function drawOverlay() {
         ctx.fillStyle = '#fff'; ctx.strokeStyle = '#1a6fd1'; ctx.lineWidth = 1.5;
         ctx.fillRect(q[0] - 4, q[1] - 4, 8, 8); ctx.strokeRect(q[0] - 4, q[1] - 4, 8, 8);
       }
+      // Round "add a node" handles at the middle of each segment: drag one to insert and move a node in one go.
+      for (const h of midHandles(f)) {
+        const q = toScreen(h.p);
+        ctx.beginPath(); ctx.arc(q[0], q[1], 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.fill();
+        ctx.strokeStyle = '#1a6fd1'; ctx.lineWidth = 1.3; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(q[0] - 2, q[1]); ctx.lineTo(q[0] + 2, q[1]); ctx.moveTo(q[0], q[1] - 2); ctx.lineTo(q[0], q[1] + 2);
+        ctx.strokeStyle = '#1a6fd1'; ctx.lineWidth = 1; ctx.stroke();
+      }
     }
   }
   if (app.drawing) {
@@ -308,6 +318,40 @@ function hitTest(w) {
   }
   const seen = new Set();
   return out.filter((h) => (seen.has(h.id + h.kind) ? false : seen.add(h.id + h.kind)));
+}
+
+// ---------- adding nodes to lines ----------
+function midHandles(f) {
+  const pts = editablePoints(f);
+  if (!pts || pts.length < 2) return [];
+  const closed = isClosed(f), segs = closed ? pts.length : pts.length - 1, out = [];
+  for (let i = 0; i < segs; i++) {
+    const a = toScreen(pts[i]), b = toScreen(pts[(i + 1) % pts.length]);
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 26) continue;   // too short to need one
+    out.push({ i, p: G.segmentMid(pts, i, closed, !!f.smooth) });
+  }
+  return out;
+}
+
+function midHandleAt(sx, sy) {
+  if (app.selSet.size !== 1) return null;
+  const f = app.sel && S.byId(app.sel);
+  if (!f) return null;
+  for (const h of midHandles(f)) { const q = toScreen(h.p); if (Math.hypot(q[0] - sx, q[1] - sy) < 7) return h; }
+  return null;
+}
+
+function nearestOnFeature(f, w) {
+  const pts = editablePoints(f);
+  if (!pts || pts.length < 2) return null;
+  const closed = isClosed(f);
+  return f.smooth && pts.length >= 3 ? G.nearestOnSpline(pts, w, closed) : G.nearestOnPath(w, pts, closed);
+}
+
+// Insert a node after control point i and return its index.
+function insertNode(f, i, p) {
+  f.points.splice(i + 1, 0, [p[0], p[1]]);
+  return i + 1;
 }
 
 function handleAt(sx, sy) {
@@ -550,6 +594,7 @@ const ctxHelpers = {
   haloDefault() { return S.getDoc().settings.haloWidth ?? 0.34; },
   detachLabel(f) { f.pathId = ''; S.commit(); },
   autoSplitUI(target, f) { buildAutoSplit(target, f); },
+  gapDefault() { return S.getDoc().settings.featureGap ?? 4; },
   // Rebuild a preset-shaped building around its current centre.
   reshapeBuilding(f) {
     if (f.shape === 'free' || !f.points.length) return;
@@ -676,6 +721,22 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 
   // select tool
+  const mh = midHandleAt(sx, sy);
+  if (mh) {
+    const f = S.byId(app.sel);
+    app.drag = { mode: 'vertex', index: insertNode(f, mh.i, mh.p), id: f.id, moved: true };
+    S.touch();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && app.selSet.size === 1) {
+    // Ctrl-click on the selected line adds a node exactly there and lets you drag it.
+    const f = S.byId(app.sel), r = f && nearestOnFeature(f, w);
+    if (r && r.d * view.s < 14) {
+      app.drag = { mode: 'vertex', index: insertNode(f, r.i, r.q), id: f.id, moved: true };
+      S.touch();
+      return;
+    }
+  }
   const hi = handleAt(sx, sy);
   if (hi >= 0) {
     app.drag = { mode: 'vertex', index: hi, id: app.sel, moved: false };
@@ -719,7 +780,7 @@ canvas.addEventListener('pointermove', (e) => {
     if (app.tool === 'select') {
       const hits = hitTest(w);
       app.hover = hits.length ? hits[0].id : null;
-      canvas.style.cursor = handleAt(sx, sy) >= 0 ? 'pointer' : hits.length ? 'move' : 'default';
+      canvas.style.cursor = midHandleAt(sx, sy) ? 'copy' : handleAt(sx, sy) >= 0 ? 'pointer' : hits.length ? 'move' : 'default';
     }
     requestRender();
     return;
@@ -794,13 +855,16 @@ canvas.addEventListener('pointerup', () => {
 canvas.addEventListener('dblclick', (e) => {
   if (app.drawing) { finishDrawing(); return; }
   if (app.tool !== 'select') return;
-  const f = app.selSet.size === 1 && app.sel && S.byId(app.sel);
-  const pts = editablePoints(f);
-  if (!pts || pts.length < 2) return;
   const w = toWorld(e.offsetX, e.offsetY);
-  const r = G.nearestOnPath(w, pts, isClosed(f));
-  if (r.d * view.s > 25) return;
-  pts.splice(r.i + 1, 0, r.q);
+  let f = app.selSet.size === 1 && app.sel && S.byId(app.sel);
+  let r = f ? nearestOnFeature(f, w) : null;
+  if (!f || !r || r.d * view.s > 25) {
+    // Double-clicking any line or outline adds a node to it, selected or not.
+    f = hitTest(w).map((h) => S.byId(h.id)).find((x) => x && editablePoints(x));
+    r = f ? nearestOnFeature(f, w) : null;
+    if (!f || !r || r.d * view.s > 25) return;
+  }
+  insertNode(f, r.i, r.q);
   S.commit();
 });
 
@@ -1431,10 +1495,73 @@ function updateStatus() {
   $('#btnRedo').disabled = !S.canRedo();
 }
 
+// ---------- population estimate ----------
+let popTimer = null;
+function schedulePop() { clearTimeout(popTimer); popTimer = setTimeout(updatePop, 250); }
+
+function updatePop() {
+  let pop = null;
+  try { pop = estimatePopulation(S.getDoc()); } catch (e) { pop = null; }
+  app.pop = pop;
+  const b = $('#btnPop');
+  if (!pop || !pop.rows.length) {
+    b.textContent = '👥 —';
+    b.title = 'Population estimate: add some districts first. Click to set the density.';
+  } else {
+    b.textContent = '👥 ≈ ' + formatPop(pop.total);
+    b.title = `About ${Math.round(pop.total).toLocaleString()} people in ${pop.blocks.toLocaleString()} blocks (${pop.hectares.toFixed(1)} ha built up) at ${pop.density} people per hectare. Click to adjust.`;
+  }
+  if (!$('#popPanel').classList.contains('hidden')) renderPopPanel();
+}
+
+function renderPopPanel() {
+  const m = $('#popPanel'), s = S.getDoc().settings, pop = app.pop;
+  m.innerHTML = '';
+  const num = (key, min, max, step) => {
+    const i = el('input', { type: 'number', min, max, step, value: s[key] });
+    i.addEventListener('change', () => { const v = parseFloat(i.value); if (!isNaN(v) && v >= min) { s[key] = v; S.commit('panel'); } });
+    return i;
+  };
+  m.append(
+    el('div', { class: 'mhead' }, 'Population estimate'),
+    el('div', { class: 'poptotal' }, pop && pop.rows.length ? `≈ ${Math.round(pop.total).toLocaleString()} people` : 'No districts yet'),
+    el('label', { class: 'mrow' }, 'People per hectare ', num('popDensity', 0, 2000, 5)),
+    el('div', { class: 'mnote' }, 'of built-up area (the blocks, without streets). Medieval cities were roughly 100–250.'),
+    el('label', { class: 'mrow' }, '1 map unit = ', num('metersPerUnit', 0.05, 100, 0.05), ' metres'),
+    el('div', { class: 'mnote' }, 'Sets how big your map really is. Change it to scale the whole estimate.'));
+  if (pop && pop.rows.length) {
+    m.append(el('div', { class: 'mhead' }, 'By district'));
+    const list = el('div', { class: 'poprows' });
+    for (const r of [...pop.rows].sort((a, b) => b.people - a.people)) {
+      list.append(el('div', { class: 'poprow', onclick: () => { select(r.id); } },
+        el('span', { class: 'pn' }, r.name), el('span', { class: 'pb' }, `${r.blocks} blocks`), el('span', { class: 'pp' }, formatPop(r.people))));
+    }
+    m.append(list,
+      el('div', { class: 'mnote' }, 'Rough guide: it counts the blocks the street generator makes, so changing a district’s block size, style or “Population weight” changes it. Parks and cemeteries count as zero.'));
+  }
+}
+
+function togglePopPanel() {
+  const m = $('#popPanel');
+  if (!m.classList.contains('hidden')) { m.classList.add('hidden'); return; }
+  updatePop();
+  renderPopPanel();
+  const b = $('#btnPop').getBoundingClientRect();
+  m.classList.remove('hidden');
+  m.style.top = b.bottom + 6 + 'px';
+  m.style.left = Math.max(8, Math.min(b.left, window.innerWidth - m.offsetWidth - 8)) + 'px';
+}
+$('#btnPop').addEventListener('click', togglePopPanel);
+document.addEventListener('pointerdown', (e) => {
+  const m = $('#popPanel');
+  if (!m.classList.contains('hidden') && !m.contains(e.target) && e.target.id !== 'btnPop') m.classList.add('hidden');
+});
+
 // ---------- boot ----------
 S.onChange((kind, source) => {
   if (kind === 'doc') {
     pruneSel();
+    schedulePop();
     if (!(source === 'panel' && app.tab !== 'layers')) renderPanel();
   }
   requestRender();
@@ -1454,6 +1581,7 @@ resize();
 fitView();
 setTool('select');
 renderPanel();
+schedulePop();
 if (document.fonts) {
   for (const f of FONTS) document.fonts.load(`600 20px "${f}"`).catch(() => {});
   document.fonts.ready.then(requestRender);

@@ -6,6 +6,7 @@ import { LABEL_STYLES } from './render.js';
 
 const opts = (o) => Object.entries(o);
 const label = (k) => ({ k, label: 'Name', t: 'text' });
+const GAP = { k: 'gap', label: 'White gap around it', t: 'optrange', min: 0, max: 20, step: 0.5, fallback: (c) => c.gapDefault() };
 
 export const SCHEMAS = {
   wall: [
@@ -16,6 +17,7 @@ export const SCHEMAS = {
     { k: 'cornerTowers', label: 'Towers at sharp corners', t: 'check' },
     { k: 'closed', label: 'Closed loop', t: 'check', rebuild: true },
     { k: 'gates', label: 'Gates at roads', t: 'check' },
+    GAP,
     { k: 'smooth', label: 'Smooth curve', t: 'check' },
   ],
   district: [
@@ -37,6 +39,7 @@ export const SCHEMAS = {
     { k: 'gradMode', label: 'Block density', t: 'select', rebuild: true, options: [['none', 'Even'], ['edge', 'Tighter toward the edge'], ['center', 'Tighter toward the center']] },
     { k: 'gradStrength', label: 'Strength', t: 'range', min: 0, max: 1.5, step: 0.05, show: (f) => (f.gradMode || 'none') !== 'none' },
     { t: 'info', text: 'Blocks get smaller where the city is denser. The gradient is measured from the middle of this district unless it was generated with a city, which shares one center.', show: (f) => (f.gradMode || 'none') !== 'none' },
+    { k: 'popFactor', label: 'Population weight', t: 'range', min: 0, max: 3, step: 0.05 },
     { t: 'heading', label: 'More street options', collapsed: true },
     { k: 'look', label: 'Look', t: 'select', options: [['blocks', 'Buildings (blocks)'], ['garden', 'Park / garden (trees)'], ['cemetery', 'Cemetery (headstones)']], rebuild: true },
     { k: 'irregularity', label: 'Irregularity', t: 'range', min: 0, max: 1, step: 0.01 },
@@ -96,6 +99,7 @@ export const SCHEMAS = {
     { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { t: 'heading', label: 'Water' },
     { k: 'coastLines', label: 'Coast lines', t: 'range', min: 0, max: 8, step: 1 },
+    GAP,
     { k: 'smooth', label: 'Smooth shore', t: 'check' },
   ],
   river: [
@@ -111,6 +115,7 @@ export const SCHEMAS = {
     { k: 'width', label: 'Width', t: 'range', min: 3, max: 250, step: 1 },
     { k: 'wobble', label: 'Bank wobble', t: 'range', min: 0, max: 0.6, step: 0.01, show: (f) => !f.canal },
     { k: 'canal', label: 'Canal (stone-lined)', t: 'check', rebuild: true },
+    GAP,
     { k: 'smooth', label: 'Smooth curve', t: 'check' },
   ],
   road: [
@@ -121,6 +126,8 @@ export const SCHEMAS = {
     { k: 'gates', label: 'Gate where it crosses wall', t: 'check', show: (f) => f.kind !== 'rural' },
     { k: 'closed', label: 'Closed loop', t: 'check' },
     { k: 'smooth', label: 'Smooth curve', t: 'check' },
+    { k: 'carve', label: 'Shape the districts around it', t: 'check' },
+    { t: 'info', text: 'On: blocks are cut away around the road and nearby generated streets line up with it. Off: the road is simply drawn over the districts and leaves them untouched.' },
   ],
   plaza: [
     label('name'),
@@ -144,6 +151,7 @@ export const SCHEMAS = {
     { k: 'tone', label: 'Block tone', t: 'select', options: [['normal', 'Normal'], ['dark', 'Dark'], ['light', 'Light'], ['park', 'Park']], show: (f) => f.style === 'district' },
     { k: 'hatch', label: 'Hatching', t: 'check', show: (f) => f.style === 'district' },
     { k: 'color', label: 'Custom fill', t: 'color' },
+    GAP,
   ],
   cutout: [
     label('name'),
@@ -256,7 +264,7 @@ export function buildForm(container, fields, obj, h) {
         // A value that can be left on the map-wide default (null) or overridden for this item.
         const wrap = el('div', { class: 'optrange' });
         const auto = el('input', { type: 'checkbox', checked: obj[fd.k] == null });
-        const fb = h.ctx && h.ctx.haloDefault ? h.ctx.haloDefault() : 0.34;
+        const fb = fd.fallback ? fd.fallback(h.ctx) : (h.ctx && h.ctx.haloDefault ? h.ctx.haloDefault() : 0.34);
         const r = el('input', { type: 'range', min: fd.min, max: fd.max, step: fd.step || 1, value: obj[fd.k] ?? fb });
         r.disabled = obj[fd.k] == null;
         auto.addEventListener('change', () => { r.disabled = auto.checked; obj[fd.k] = auto.checked ? null : parseFloat(r.value); after(); });

@@ -242,3 +242,37 @@ export function inflatePoly(poly, d) {
   }
   return out;
 }
+
+// ---- editing helpers for smoothed (spline) lines ----
+function ctrl(pts, closed) {
+  const n = pts.length;
+  return (k) => (closed ? pts[((k % n) + n) % n] : pts[Math.max(0, Math.min(n - 1, k))]);
+}
+
+// Points along the curve piece between control point i and i+1.
+export function splinePiece(pts, i, closed, steps = 12) {
+  const get = ctrl(pts, closed), out = [];
+  for (let s = 0; s <= steps; s++) out.push(cr(get(i - 1), get(i), get(i + 1), get(i + 2), s / steps));
+  return out;
+}
+
+// Middle of the segment after control point i, ON the drawn curve when the line is smoothed.
+export function segmentMid(pts, i, closed, smooth) {
+  const n = pts.length;
+  if (smooth && n >= 3) { const get = ctrl(pts, closed); return cr(get(i - 1), get(i), get(i + 1), get(i + 2), 0.5); }
+  return lerp(pts[i], pts[(i + 1) % n], 0.5);
+}
+
+// Nearest point on a smoothed line; returns { d, i, q } where i is the control segment it falls in.
+export function nearestOnSpline(pts, p, closed) {
+  const n = pts.length, segs = closed ? n : n - 1;
+  let best = { d: Infinity, i: 0, q: pts[0] };
+  for (let i = 0; i < segs; i++) {
+    const piece = splinePiece(pts, i, closed, 14);
+    for (let k = 0; k < piece.length - 1; k++) {
+      const r = projSeg(p, piece[k], piece[k + 1]);
+      if (r.d < best.d) best = { d: r.d, i, q: r.q };
+    }
+  }
+  return best;
+}

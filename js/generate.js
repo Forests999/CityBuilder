@@ -82,7 +82,7 @@ export function districtGen(f, shape, center, guides) {
       pattern: f.pattern, blockSize: Math.max(6, +f.blockSize || 38), streetWidth: +f.streetWidth || 4,
       irregularity: +f.irregularity || 0, warp: +f.warp || 0, gridAngle: +f.gridAngle || 0,
       lots: !!f.lots, courtyards: +f.courtyards || 0, seed: (f.seed >>> 0) || 1, center,
-      leaves: look !== 'blocks', guides: guides && guides.list.length ? guides.list : null, grad,
+      leaves: true, guides: guides && guides.list.length ? guides.list : null, grad,
     });
     g.decor = look !== 'blocks' ? lookDecor(f, shape, g, look) : null;
     return g;
