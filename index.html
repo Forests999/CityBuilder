@@ -1,41 +1,115 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>City Builder</title>
-<link rel="stylesheet" href="style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>City Map Maker</title>
+  <meta name="description" content="Draw hand-inked fantasy city maps: walls, rivers, districts with generated streets, roads, plazas and labels.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%237a2e23' stroke='%23141414' stroke-width='3'/%3E%3Cpath d='M16 3v26M3 16h26M7 7l18 18' stroke='%23f2ede1' stroke-width='2.4'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=MedievalSharp&family=Oswald:wght@400;500;600&family=Pirata+One&family=Spectral+SC:wght@400;600&family=Uncial+Antiqua&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<aside>
-  <h1>City Builder</h1>
-  <label>Title <input id="title" type="text"></label>
-  <label>Seed <span class="row"><input id="seed" type="number"><button id="reroll">Reroll</button></span></label>
+  <div id="app">
+    <header id="topbar">
+      <span class="brand">City Map Maker</span>
+      <div class="group">
+        <button id="btnNewRandom" title="Generate a new random city to start from">🎲 Random city</button>
+        <button id="btnNewBlank" title="Start an empty map">New blank</button>
+        <button id="btnOpen" title="Open a saved .city.json file">Open…</button>
+        <button id="btnSave" title="Save the map as a .city.json file (Ctrl+S)">Save</button>
+      </div>
+      <div class="group">
+        <button id="btnUndo" title="Undo (Ctrl+Z)">↶</button>
+        <button id="btnRedo" title="Redo (Ctrl+Y)">↷</button>
+        <button id="btnFit" title="Fit page to screen (Shift+F)">⤢ Fit</button>
+      </div>
+      <div class="spacer"></div>
+      <div class="group">
+        <select id="exportScale" title="Export resolution">
+          <option value="1">1×</option>
+          <option value="2" selected>2×</option>
+          <option value="3">3×</option>
+        </select>
+        <button id="btnExport" class="primary" title="Download the map as a PNG image">Export PNG</button>
+        <button id="btnHelp" title="Keyboard shortcuts and help">?</button>
+      </div>
+    </header>
+    <div id="main">
+      <nav id="tools" aria-label="Tools"></nav>
+      <div id="stage"><canvas id="map"></canvas></div>
+      <aside id="panel">
+        <div class="tabs">
+          <button data-tab="props" class="active">Properties</button>
+          <button data-tab="layers">Layers</button>
+          <button data-tab="map">Map</button>
+        </div>
+        <div id="panelBody"></div>
+      </aside>
+    </div>
+    <footer id="status">
+      <span id="stCoords"></span>
+      <span id="stZoom"></span>
+      <span id="stHint"></span>
+    </footer>
+  </div>
 
-  <h2>Layout</h2>
-  <label>Spokes <b id="spokesv"></b><input id="spokes" type="range" min="4" max="24" step="1"></label>
-  <label>Rings <b id="ringsv"></b><input id="rings" type="range" min="1" max="6" step="1"></label>
-  <label>Building density <b id="densityv"></b><input id="density" type="range" min="0.4" max="3" step="0.1"></label>
-
-  <h2>Rivers</h2>
-  <div class="row"><span id="riverlabel"></span><button id="nextriver">Next</button></div>
-  <label>Width <b id="rwidthv"></b><input id="rwidth" type="range" min="8" max="120" step="1"></label>
-  <div class="row"><button id="addriver">Add river</button><button id="delriver">Delete river</button></div>
-
-  <h2>Editing</h2>
-  <label class="check"><input id="handles" type="checkbox" checked> Show handles</label>
-  <p class="hint">Drag <span class="dot wall"></span> wall, <span class="dot river"></span> river, <span class="dot center"></span> center.
-  Drag a small hollow dot to add a point. Double-click a point to delete it.</p>
-
-  <h2>File</h2>
-  <div class="row"><button id="exsvg">SVG</button><button id="expng">PNG</button></div>
-  <div class="row"><button id="exjson">Save</button><label class="btn">Load<input id="imjson" type="file" accept=".json" hidden></label></div>
-  <button id="reset" class="danger">Reset map</button>
-</aside>
-<main><svg id="map" xmlns="http://www.w3.org/2000/svg"></svg></main>
-<script src="js/geom.js"></script>
-<script src="js/generate.js"></script>
-<script src="js/render.js"></script>
-<script src="js/app.js"></script>
+  <div id="help" class="modal hidden">
+    <div class="card">
+      <button class="close" title="Close">×</button>
+      <h2>City Map Maker</h2>
+      <p>Draw the big shapes — wall, river, avenues, districts — and the street network fills in automatically. Everything stays editable.</p>
+      <div class="cols">
+        <div>
+          <h4>Tools</h4>
+          <table>
+            <tr><td><kbd>V</kbd></td><td>Select &amp; move</td></tr>
+            <tr><td><kbd>W</kbd></td><td>City wall</td></tr>
+            <tr><td><kbd>D</kbd></td><td>District</td></tr>
+            <tr><td><kbd>A</kbd></td><td>Lake / sea</td></tr>
+            <tr><td><kbd>F</kbd></td><td>River</td></tr>
+            <tr><td><kbd>N</kbd></td><td>Canal</td></tr>
+            <tr><td><kbd>R</kbd></td><td>Avenue</td></tr>
+            <tr><td><kbd>S</kbd></td><td>Street</td></tr>
+            <tr><td><kbd>U</kbd></td><td>Country road</td></tr>
+            <tr><td><kbd>P</kbd></td><td>Plaza</td></tr>
+            <tr><td><kbd>B</kbd></td><td>Building / keep</td></tr>
+            <tr><td><kbd>L</kbd></td><td>Landmark</td></tr>
+            <tr><td><kbd>T</kbd></td><td>Text label</td></tr>
+            <tr><td><kbd>C</kbd></td><td>Compass rose</td></tr>
+          </table>
+        </div>
+        <div>
+          <h4>Drawing</h4>
+          <table>
+            <tr><td>Click</td><td>Add a point</td></tr>
+            <tr><td>Drag</td><td>Sketch freehand</td></tr>
+            <tr><td>Double-click / <kbd>Enter</kbd></td><td>Finish shape</td></tr>
+            <tr><td><kbd>Backspace</kbd></td><td>Remove last point</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Cancel</td></tr>
+            <tr><td><kbd>Alt</kbd></td><td>Don't snap</td></tr>
+          </table>
+          <h4>Editing</h4>
+          <table>
+            <tr><td>Drag point</td><td>Move a vertex</td></tr>
+            <tr><td>Double-click edge</td><td>Insert a vertex</td></tr>
+            <tr><td>Right-click point</td><td>Delete a vertex</td></tr>
+            <tr><td>Alt-click</td><td>Cycle overlapping items</td></tr>
+            <tr><td><kbd>Del</kbd></td><td>Delete selected</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Duplicate</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Y</kbd></td><td>Undo / redo</td></tr>
+            <tr><td>Wheel · Space-drag</td><td>Zoom · pan</td></tr>
+          </table>
+        </div>
+      </div>
+      <p class="info">Your map autosaves in this browser. Use <b>Save</b> to download a <code>.city.json</code> you can re-open anywhere, and <b>Export PNG</b> for the finished image.</p>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <input type="file" id="fileOpen" accept=".json,application/json" hidden>
+  <input type="file" id="fileRef" accept="image/*" hidden>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>
