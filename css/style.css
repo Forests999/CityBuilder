@@ -98,3 +98,15 @@ kbd { background: #1c1d21; border: 1px solid var(--line); border-bottom-width: 2
   .card .cols { grid-template-columns: 1fr; }
   .brand { display: none; }
 }
+
+button.wide { display: block; width: 100%; margin: 6px 0; text-align: left; }
+.layers { display: flex; flex-direction: column; gap: 1px; }
+.layer .grip { cursor: grab; color: var(--muted); padding-right: 2px; user-select: none; }
+.layer .licon svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: #c9c6be; display: block; }
+.layer .licon { margin-right: 4px; }
+.layer.dragging { opacity: .4; }
+.layer.drop-above { box-shadow: inset 0 2px 0 #4db0ff; }
+.layer.drop-below { box-shadow: inset 0 -2px 0 #4db0ff; }
+
+.layer { user-select: none; }
+.layer .grip { touch-action: none; }

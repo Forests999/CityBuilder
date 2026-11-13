@@ -5,19 +5,30 @@ import { PRESETS } from './generate.js';
 const STORAGE_KEY = 'citybuilder.doc.v1';
 
 export const TYPE_LABELS = {
-  wall: 'Wall', district: 'District', water: 'Lake / Sea', river: 'River / Canal', road: 'Road',
+  wall: 'Wall', district: 'District', farm: 'Farmland', water: 'Lake / Sea', river: 'River / Canal', road: 'Road',
   plaza: 'Plaza', building: 'Building', landmark: 'Landmark', label: 'Label', compass: 'Compass',
 };
 
-// Bottom-to-top drawing order; also the grouping used by the Layers tab.
-export const RENDER_ORDER = ['water', 'district', 'river', 'road', 'plaza', 'building', 'wall', 'landmark', 'label', 'compass'];
+// Default bottom-to-top order. Features are drawn in array order, so the user can
+// rearrange them freely; this only decides where a newly drawn feature is inserted.
+export const DEFAULT_ORDER = ['farm', 'water', 'district', 'river', 'road', 'plaza', 'building', 'wall', 'landmark', 'label', 'compass'];
+const rank = (t) => { const i = DEFAULT_ORDER.indexOf(t); return i < 0 ? DEFAULT_ORDER.length : i; };
+
+export function sortByDefaultOrder(features) {
+  return features.map((f, i) => [f, i]).sort((a, b) => rank(a[0].type) - rank(b[0].type) || a[1] - b[1]).map((x) => x[0]);
+}
 
 export const DEFAULTS = {
-  wall: { name: 'City Wall', width: 7, towerSpacing: 60, towerSize: 5, smooth: false, gates: true },
+  wall: { name: 'City Wall', width: 7, towerSpacing: 60, towerSize: 5, cornerTowers: true, smooth: false, gates: true },
   district: {
     name: 'New District', showLabel: true, labelSize: 30, labelAngle: 0, labelSpacing: 0.35, labelOffset: [0, 0],
     preset: 'standard', ...PRESETS.standard, gridAngle: 0, color: '', borderStreet: 3,
-    smooth: false, followWall: false, clipWall: false, seed: 1,
+    smooth: false, followWall: '', clipWall: '', seed: 1,
+  },
+  farm: {
+    name: '', showLabel: false, labelSize: 24, labelAngle: 0, labelSpacing: 0.3, labelOffset: [0, 0],
+    parcelSize: 110, pattern: 'organic', irregularity: 0.6, warp: 6, gridAngle: 0,
+    furrows: true, furrowSpacing: 6, hedges: true, smooth: false, clipWall: '', seed: 1,
   },
   water: { name: '', showLabel: false, labelSize: 40, labelAngle: 0, labelSpacing: 0.4, labelOffset: [0, 0], coastLines: 3, smooth: true },
   river: { name: 'River', showLabel: true, labelSize: 26, labelSpacing: 1.0, labelPos: 0.5, width: 60, wobble: 0.15, canal: false, smooth: true },
@@ -31,14 +42,14 @@ export const DEFAULTS = {
 
 export function defaultSettings() {
   return {
-    theme: 'ash', colors: {}, frame: true, frameWidth: 36, fields: true, fieldSize: 170,
-    hatch: true, hatchSpacing: 3.6, outline: 1.2, glow: true, glowSize: 40,
+    theme: 'patina', colors: {}, frame: true, frameStyle: 'solid', frameWidth: 30, fields: true, fieldSize: 170,
+    hatch: true, hatchSpacing: 3.6, outline: 1.2, glow: true, glowSize: 40, featureGap: 4, haloWidth: 0.34,
     fontLabel: 'Cinzel', fontTitle: 'Oswald', fontScript: 'IM Fell English', seed: 1,
   };
 }
 
 export function blankDoc() {
-  return { version: 1, meta: { title: 'New City', width: 3000, height: 2200 }, settings: defaultSettings(), features: [] };
+  return { version: 2, meta: { title: 'New City', width: 3000, height: 2200 }, settings: defaultSettings(), features: [] };
 }
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -49,8 +60,33 @@ export function newId() {
 
 export function createFeature(type, points, extra = {}) {
   const f = { id: newId(), type, points: clone(points), ...clone(DEFAULTS[type] || {}), ...clone(extra) };
-  if (type === 'district' && extra.seed == null) f.seed = Math.floor(Math.random() * 1e9);
+  if ((type === 'district' || type === 'farm') && extra.seed == null) f.seed = Math.floor(Math.random() * 1e9);
   return f;
+}
+
+// Insert a new feature at its natural depth: just above the last feature of the
+// same or a lower default rank.
+export function insertFeature(f) {
+  const arr = doc.features;
+  let at = 0;
+  for (let i = 0; i < arr.length; i++) if (rank(arr[i].type) <= rank(f.type)) at = i + 1;
+  arr.splice(at, 0, f);
+  return f;
+}
+
+function migrate(doc, version) {
+  if (version < 2) {
+    doc.features = sortByDefaultOrder(doc.features);
+    if (doc.settings.theme === 'ash') doc.settings.frameStyle = 'ornate';
+  }
+  const firstWall = doc.features.find((f) => f.type === 'wall');
+  for (const f of doc.features) {
+    if (f.clipWall === true) f.clipWall = 'all';
+    if (f.clipWall === false || f.clipWall == null) f.clipWall = '';
+    if (f.followWall === true) f.followWall = firstWall ? firstWall.id : '';
+    if (f.followWall === false || f.followWall == null) f.followWall = '';
+  }
+  doc.version = 2;
 }
 
 function normalize(d) {
@@ -62,6 +98,7 @@ function normalize(d) {
     doc.features = Array.isArray(d.features) ? d.features.filter((f) => f && DEFAULTS[f.type]).map((f) => ({
       ...clone(DEFAULTS[f.type]), ...f, id: f.id || newId(), points: Array.isArray(f.points) ? f.points : [],
     })) : [];
+    migrate(doc, d.version || 1);
   }
   return doc;
 }

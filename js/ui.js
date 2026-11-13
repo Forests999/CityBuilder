@@ -12,6 +12,7 @@ export const SCHEMAS = {
     { k: 'width', label: 'Thickness', t: 'range', min: 1, max: 30, step: 0.5 },
     { k: 'towerSpacing', label: 'Tower spacing', t: 'range', min: 15, max: 300, step: 1 },
     { k: 'towerSize', label: 'Tower size', t: 'range', min: 0, max: 20, step: 0.5 },
+    { k: 'cornerTowers', label: 'Towers at sharp corners', t: 'check' },
     { k: 'gates', label: 'Gates at roads', t: 'check' },
     { k: 'smooth', label: 'Smooth curve', t: 'check' },
   ],
@@ -39,9 +40,33 @@ export const SCHEMAS = {
     { k: 'hatch', label: 'Hatching', t: 'check' },
     { k: 'borderStreet', label: 'Border street', t: 'range', min: 0, max: 20, step: 0.5 },
     { t: 'heading', label: 'Shape' },
-    { k: 'followWall', label: 'Follow city wall', t: 'check', rebuild: true, onChange: (f, ctx) => ctx.unlinkWall(f) },
-    { k: 'clipWall', label: 'Clip to wall', t: 'check', show: (f) => !f.followWall },
+    { k: 'followWall', label: 'Shape follows', t: 'select', rebuild: true, options: (f, ctx) => [['', 'Its own outline'], ...ctx.wallOptions()],
+      onChange: (f, ctx, prev) => ctx.unlinkWall(f, prev) },
+    { k: 'clipWall', label: 'Clip to wall', t: 'select', options: (f, ctx) => [['', 'Off'], ['all', 'Inside any wall'], ...ctx.wallOptions()] },
     { k: 'smooth', label: 'Smooth edges', t: 'check', show: (f) => !f.followWall },
+    { t: 'heading', label: 'Tools' },
+    { t: 'button', label: '✂ Split with a line', help: 'Draw a line across this district to break it into two.', action: (f, ctx) => ctx.startSplit(f) },
+    { t: 'button', label: '🏰 Create wall around it', help: 'Adds a wall that traces this outline exactly and clips the district to it.', action: (f, ctx) => ctx.wallFromArea(f) },
+  ],
+  farm: [
+    label('name'),
+    { k: 'showLabel', label: 'Show label', t: 'check' },
+    { k: 'labelSize', label: 'Label size', t: 'range', min: 8, max: 160, step: 1 },
+    { k: 'labelAngle', label: 'Label angle', t: 'range', min: -90, max: 90, step: 1 },
+    { t: 'heading', label: 'Fields' },
+    { k: 'pattern', label: 'Pattern', t: 'select', options: [['organic', 'Organic'], ['radial', 'Radial'], ['grid', 'Grid (strip fields)']], rebuild: true },
+    { k: 'gridAngle', label: 'Grid angle', t: 'range', min: 0, max: 180, step: 1, show: (f) => f.pattern === 'grid' },
+    { k: 'parcelSize', label: 'Field size', t: 'range', min: 20, max: 500, step: 1 },
+    { k: 'irregularity', label: 'Irregularity', t: 'range', min: 0, max: 1, step: 0.01 },
+    { k: 'warp', label: 'Curviness', t: 'range', min: 0, max: 40, step: 0.5 },
+    { k: 'furrows', label: 'Furrow lines', t: 'check' },
+    { k: 'furrowSpacing', label: 'Furrow spacing', t: 'range', min: 2, max: 20, step: 0.5 },
+    { k: 'hedges', label: 'Hedgerows', t: 'check' },
+    { k: 'seed', label: 'Layout seed', t: 'seed' },
+    { t: 'heading', label: 'Shape' },
+    { k: 'clipWall', label: 'Clip to wall', t: 'select', options: (f, ctx) => [['', 'Off'], ['all', 'Inside any wall'], ...ctx.wallOptions()] },
+    { k: 'smooth', label: 'Smooth edges', t: 'check' },
+    { t: 'button', label: '✂ Split with a line', action: (f, ctx) => ctx.startSplit(f) },
   ],
   water: [
     label('name'),
@@ -153,10 +178,25 @@ export function buildForm(container, fields, obj, h) {
         input = wrap;
         break;
       }
-      case 'select':
-        input = el('select', {}, ...fd.options.map(([v, l]) => el('option', { value: v, selected: String(obj[fd.k]) === String(v) }, l)));
-        input.addEventListener('change', () => { obj[fd.k] = input.value; after(); });
+      case 'select': {
+        const options = typeof fd.options === 'function' ? fd.options(obj, h.ctx) : fd.options;
+        const sel = el('select', {}, ...options.map(([v, l]) => el('option', { value: v, selected: String(obj[fd.k] ?? '') === String(v) }, l)));
+        sel.addEventListener('change', () => {
+          const prev = obj[fd.k];
+          obj[fd.k] = sel.value;
+          if (fd.onChange) fd.onChange(obj, h.ctx, prev);
+          h.onCommit();
+          if (fd.rebuild) h.rebuild();
+        });
+        input = sel;
         break;
+      }
+      case 'button': {
+        const b = el('button', { type: 'button', class: 'wide', title: fd.help || '' }, fd.label);
+        b.addEventListener('click', (e) => { e.preventDefault(); fd.action(obj, h.ctx); });
+        container.append(b);
+        continue;
+      }
       case 'check': {
         const cb = el('input', { type: 'checkbox', checked: !!obj[fd.k] });
         cb.addEventListener('change', () => { obj[fd.k] = cb.checked; after(); });

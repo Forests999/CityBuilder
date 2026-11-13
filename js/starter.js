@@ -3,7 +3,7 @@
 
 import * as G from './geom.js';
 import { makeRng, makeNoise } from './rng.js';
-import { blankDoc, createFeature } from './state.js';
+import { blankDoc, createFeature, sortByDefaultOrder } from './state.js';
 import { PRESETS } from './generate.js';
 
 const SYL1 = ['Vel', 'Kar', 'Mor', 'Tal', 'Ess', 'Bran', 'Dor', 'Ul', 'Ser', 'Ath', 'Cal', 'Ven', 'Ost', 'Ira', 'Hal', 'Quel', 'Rhy', 'Zan', 'Thal', 'Gor'];
@@ -35,11 +35,13 @@ export function randomCity(seed) {
   // Wall
   const nv = R.int(14, 19), wpts = [];
   for (let i = 0; i < nv; i++) { const a = (i / nv) * Math.PI * 2 + R.range(-0.08, 0.08); wpts.push(at(a, R.range(0.97, 1.03))); }
-  F.push(createFeature('wall', wpts, { name: name + ' Wall' }));
+  const wallF = createFeature('wall', wpts, { name: name + ' Wall' });
+  F.push(wallF);
+  const wallId = wallF.id;
 
   // Base fill that follows the wall
   F.push(createFeature('district', [], {
-    name: 'City fill', showLabel: false, followWall: true, locked: true, borderStreet: 0, preset: 'standard', ...PRESETS.standard, seed: R.int(1, 1e9),
+    name: 'City fill', showLabel: false, followWall: wallId, borderStreet: 0, preset: 'standard', ...PRESETS.standard, seed: R.int(1, 1e9),
   }));
 
   // Avenues radiating from the center, through gates, into the countryside
@@ -70,8 +72,8 @@ export function randomCity(seed) {
   const sectors = angles.map((_, i) => i);
   const take = () => sectors.splice(R.int(0, sectors.length - 1), 1)[0];
   const slum = take(), docks = take();
-  F.push(createFeature('district', wedge(slum, 0.62, 1.25), { name: districtName(R), preset: 'dense', ...PRESETS.dense, clipWall: true, borderStreet: 3.5, seed: R.int(1, 1e9), labelSize: 28 }));
-  F.push(createFeature('district', wedge(docks, 0.56, 1.25), { name: districtName(R), preset: 'townhouses', ...PRESETS.townhouses, clipWall: true, borderStreet: 4, seed: R.int(1, 1e9), labelSize: 28 }));
+  F.push(createFeature('district', wedge(slum, 0.62, 1.25), { name: districtName(R), preset: 'dense', ...PRESETS.dense, clipWall: wallId, borderStreet: 3.5, seed: R.int(1, 1e9), labelSize: 28 }));
+  F.push(createFeature('district', wedge(docks, 0.56, 1.25), { name: districtName(R), preset: 'townhouses', ...PRESETS.townhouses, clipWall: wallId, borderStreet: 4, seed: R.int(1, 1e9), labelSize: 28 }));
   const core = [];
   for (let s = 0; s < 16; s++) core.push(at((s / 16) * Math.PI * 2, 0.42));
   F.push(createFeature('district', core, { name: districtName(R), preset: 'noble', ...PRESETS.noble, borderStreet: 0, seed: R.int(1, 1e9), labelSize: 26, labelOffset: [0, rad * 0.24] }));
@@ -121,5 +123,12 @@ export function randomCity(seed) {
 
   F.push(createFeature('label', [[W * 0.12, H * 0.1]], { text: name, style: 'title', size: 64, spacing: 0.2 }));
   F.push(createFeature('compass', [[W - 230, H - 240]], { size: 120 }));
+
+  // Farmland outside the walls
+  for (const i of sectors.slice(-2)) {
+    F.push(createFeature('farm', wedge(i, 1.12, 1.6), { seed: R.int(1, 1e9), parcelSize: Math.round(R.range(90, 140)) }));
+  }
+
+  doc.features = sortByDefaultOrder(F);
   return doc;
 }

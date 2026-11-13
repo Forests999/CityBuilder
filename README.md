@@ -4,20 +4,29 @@ A browser-based editor for hand-inked fantasy city maps, made for illustrating c
 
 You draw the big shapes (wall, rivers, avenues, districts) and the street network fills itself in: dense, crooked alleys in the slums, radial rings around the citadel, planned grids by the docks. Everything stays editable and draggable, and you can export a high-resolution PNG for print.
 
-**Use it:** https://forests999.github.io/CityBuilder/ (after GitHub Pages is enabled, see below)
+**Use it:** https://forests999.github.io/CityBuilder/
+
+## Recommended workflow
+
+1. Draw (or generate) the city's whole footprint as one district, often by giving it a wall and letting the district follow it.
+2. Use **✂ Split** (K) to cut that footprint into smaller districts, then give each piece its own preset (slums, noble estates, docks…). Pieces that keep the same settings stay seamless, because every district is cut from one shared city-wide street network.
+3. Add avenues, plazas, rivers and canals on top. Anything above a district in the Layers list cuts through its blocks, so the block outlines wrap around it with a small gap at rivers and walls.
 
 ## Features
 
-- **Walls** with round towers and automatic gatehouses wherever an avenue crosses them
-- **Districts** that generate their own streets from presets (standard quarter, dense slums, noble estates, radial rings, planned grid, townhouses & lots, docks/industry, park). Block size, street width, curviness, irregularity, pattern and seed can all be tuned
-- **Rivers & canals** with rippled water and labels set along the curve
+- **Walls** with evenly spaced round towers, optional corner towers, and automatic gatehouses wherever an avenue crosses them. Any district can create a wall that traces its outline exactly
+- **Districts** that generate their own streets from presets (standard quarter, dense slums, noble estates, radial rings, planned grid, townhouses & lots, docks/industry, park). Block size, street width, curviness, irregularity, pattern and seed can all be tuned. Each district can follow a chosen wall's shape or be clipped to a chosen wall
+- **Split tool** to break a large district (or farmland) into smaller pieces along a drawn line
+- **Farmland** zones filled with patchwork fields, furrows and hedgerows
+- **Rivers & canals** with natural banks, ripples concentrated at the edges, and labels set along the curve
 - **Lakes / seas** with layered coastlines
 - **Avenues, streets and country roads**: avenues turn into thin country lanes outside the wall
 - **Plazas** (statue, fountain, obelisk, ring, tree), **buildings / keeps**, **landmarks** with labels
-- **Labels** in several styles (spaced district caps, gate names, water, script, boxed title), **compass rose**, ornamental **frame**, countryside **field lines**
-- **5 themes** (Ash & Ember red, Coastal pastel, Ink & Slate, Old Parchment, Midnight), with every color and font overridable
+- **Labels** in several styles with adjustable light halos for readability, **compass rose**, solid or ornate **border**, countryside **field lines**
+- **6 themes**: Patina & Amber (default), Ash & Ember, Coastal pastel, Ink & Slate, Old Parchment, Midnight. Every color and font can be overridden
+- **Free layer order**: drag layers in the Layers tab, e.g. to put a lake above a river or the other way round
 - **Tracing image**: load a sketch and draw over it
-- Undo/redo, layers (show/hide/lock/reorder), autosave in the browser, save/open `.city.json` files, PNG export at 1–3×
+- Undo/redo, show/hide/lock layers, autosave in the browser, save/open `.city.json` files, PNG export at 1–3×
 
 ## Controls
 
@@ -37,6 +46,8 @@ You draw the big shapes (wall, rivers, avenues, districts) and the street networ
 | L | Landmark | | Backspace (while drawing) | remove last point |
 | T | Text label | | Esc | cancel / deselect |
 | C | Compass | | Alt (while drawing) | don't snap |
+| K | Split district | | Drag a layer row | reorder layers |
+| G | Farmland | | | |
 
 While drawing, click to place points or drag to sketch freehand.
 

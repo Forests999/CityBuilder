@@ -31,12 +31,16 @@ const ICON = {
   landmark: '<circle cx="12" cy="9" r="3.5"/><path d="M12 13v8"/>',
   label: '<path d="M5 5h14M12 5v14M9 19h6"/>',
   compass: '<circle cx="12" cy="12" r="9"/><path d="M12 4l2.5 8-2.5 8-2.5-8z"/>',
+  split: '<path d="M4 6l9-3 7 6-3 11-11-2z" opacity=".5"/><path d="M3 20L21 4" stroke-dasharray="3 2"/>',
+  farm: '<path d="M3 6h18v13H3z"/><path d="M3 12h18M11 6v13"/><path d="M5 8.5h4M5 10h4M13 14h6M13 16.5h6" opacity=".6"/>',
 };
 
 const TOOLS = [
   { id: 'select', key: 'v', label: 'Select & move', hint: 'Click to select · drag to move · drag empty space to pan · double-click an edge to add a point · right-click a point to delete it · Alt-click to cycle overlapping items' },
   { id: 'wall', key: 'w', type: 'wall', draw: 'poly', label: 'City wall', hint: 'Click to place wall corners · drag to sketch freehand · click the first point, double-click or Enter to close' },
   { id: 'district', key: 'd', type: 'district', draw: 'poly', label: 'District', hint: 'Outline a district; streets are generated inside it. Click the first point or double-click to finish' },
+  { id: 'split', key: 'k', draw: 'line', label: 'Split district', hint: 'Draw a line across a district or farmland to break it in two (only the selected one, if any) · double-click / Enter to cut' },
+  { id: 'farm', key: 'g', type: 'farm', draw: 'poly', label: 'Farmland', hint: 'Outline farmland; it fills with fields, furrows and hedgerows · double-click to finish' },
   { id: 'water', key: 'a', type: 'water', draw: 'poly', label: 'Lake / sea / bay', hint: 'Outline a body of water (drag to sketch a coastline) · double-click to finish' },
   { id: 'river', key: 'f', type: 'river', draw: 'line', label: 'River', hint: 'Click points along the river (or drag freehand) · double-click / Enter to finish' },
   { id: 'canal', key: 'n', type: 'river', draw: 'line', label: 'Canal', extra: { canal: true, width: 15, name: '', showLabel: false, smooth: false }, hint: 'Click points along the canal · double-click to finish' },
@@ -181,12 +185,11 @@ function hitTest(w) {
     const half = f.type === 'road' && f.kind === 'rural' ? 2 : f.width / 2;
     if (G.nearestOnPath(w, sh, isClosed(f)).d < half + tol) out.push({ id: f.id, kind: 'move' });
   }
-  for (const type of ['building', 'district', 'water']) {
-    for (const f of fs) {
-      if (f.type !== type) continue;
-      const sh = featureShape(f, doc);
-      if (sh.length >= 3 && G.pointInPoly(w, sh)) out.push({ id: f.id, kind: 'move' });
-    }
+  // Areas: topmost layer first.
+  for (const f of fs) {
+    if (!['building', 'district', 'water', 'farm'].includes(f.type)) continue;
+    const sh = featureShape(f, doc);
+    if (sh.length >= 3 && G.pointInPoly(w, sh)) out.push({ id: f.id, kind: 'move' });
   }
   const seen = new Set();
   return out.filter((h) => (seen.has(h.id + h.kind) ? false : seen.add(h.id + h.kind)));
@@ -227,6 +230,7 @@ function select(id) {
 function setTool(id) {
   if (app.drawing) finishDrawing();
   app.tool = id;
+  if (id !== 'split') app.splitTarget = null;
   document.querySelectorAll('.tool').forEach((b) => b.classList.toggle('active', b.dataset.tool === id));
   canvas.style.cursor = id === 'select' ? 'default' : 'crosshair';
   if (!app.sel) renderPanel();
@@ -243,18 +247,73 @@ function finishDrawing() {
   if (t.draw === 'poly' && pts.length > 3 && G.dist(pts[0], pts[pts.length - 1]) < 3 / view.s) pts.pop();
   const min = t.draw === 'poly' ? 3 : 2;
   if (pts.length < min) { requestRender(); return; }
-  const extra = { ...(t.extra || {}) };
-  if (t.type === 'district' && S.getDoc().features.some((f) => f.type === 'district')) extra.name = 'New District';
-  const f = S.createFeature(t.type, pts, extra);
-  S.getDoc().features.push(f);
+  if (t.id === 'split') { splitAreas(pts, d.target); return; }
+  const f = S.createFeature(t.type, pts, t.extra || {});
+  S.insertFeature(f);
   app.sel = f.id;
   S.commit();
+}
+
+// Cut a polygon in two along a polyline that crosses its boundary.
+function splitPolygon(P, L) {
+  const n = P.length, hits = [];
+  for (let i = 0; i < L.length - 1; i++) {
+    for (let e = 0; e < n; e++) {
+      const r = G.segIntersect(L[i], L[i + 1], P[e], P[(e + 1) % n]);
+      if (r) hits.push({ li: i, t: r.t, e, u: r.u, p: r.p });
+    }
+  }
+  hits.sort((a, b) => a.li - b.li || a.t - b.t);
+  const uniq = hits.filter((h, i) => i === 0 || G.dist(h.p, hits[i - 1].p) > 1e-6);
+  if (uniq.length < 2) return null;
+  const h1 = uniq[0], h2 = uniq[1];
+  const inner = L.slice(h1.li + 1, h2.li + 1).map((p) => p.slice());
+  const walk = (a, b) => {
+    const out = [a.p];
+    if (a.e === b.e && b.u > a.u) { out.push(b.p); return out; }
+    let k = a.e;
+    do { k = (k + 1) % n; out.push(P[k].slice()); } while (k !== b.e);
+    out.push(b.p);
+    return out;
+  };
+  const A = walk(h1, h2).concat(inner.slice().reverse());
+  const B = walk(h2, h1).concat(inner);
+  if (Math.abs(G.polyArea(A)) < 50 || Math.abs(G.polyArea(B)) < 50) return null;
+  return [A, B];
+}
+
+function splitAreas(line, targetId) {
+  const doc = S.getDoc();
+  const targets = targetId ? [S.byId(targetId)].filter(Boolean)
+    : doc.features.filter((f) => (f.type === 'district' || f.type === 'farm') && !f.hidden);
+  let made = null, count = 0;
+  for (const f of targets) {
+    const P = f.followWall ? (doc.features.find((w) => w.id === f.followWall) || {}).points : f.points;
+    if (!P || P.length < 3) continue;
+    const parts = splitPolygon(P, line);
+    if (!parts) continue;
+    if (f.followWall) { if (!f.clipWall) f.clipWall = f.followWall; f.followWall = ''; }
+    f.points = parts[0];
+    f.locked = false;
+    const c = JSON.parse(JSON.stringify(f));
+    c.id = S.newId();
+    c.points = parts[1];
+    if (c.name) c.name = c.name === 'City fill' ? 'New District' : c.name + ' (part)';
+    if (f.name === 'City fill') f.name = 'District';
+    doc.features.splice(doc.features.indexOf(f) + 1, 0, c);
+    made = c.id; count++;
+  }
+  if (!count) { toast('The line must cross all the way through a district (or farmland) to split it.'); requestRender(); return; }
+  app.sel = made;
+  setTool('select');
+  S.commit();
+  toast(count === 1 ? 'Split into two — the new piece is selected. Pick a preset to restyle it.' : `Split ${count} areas.`);
 }
 
 function placePoint(t, w) {
   const f = S.createFeature(t.type, [w], t.extra || {});
   if (t.type === 'label') f.text = 'New Label';
-  S.getDoc().features.push(f);
+  S.insertFeature(f);
   app.sel = f.id;
   app.tab = 'props';
   S.commit();
@@ -283,11 +342,30 @@ function duplicateSelected() {
 }
 
 const ctxHelpers = {
-  unlinkWall(f) {
+  wallOptions() {
+    return S.getDoc().features.filter((f) => f.type === 'wall').map((w, i) => [w.id, w.name || `Wall ${i + 1}`]);
+  },
+  unlinkWall(f, prev) {
     if (!f.followWall && f.points.length < 3) {
-      const w = findWalls(S.getDoc())[0];
+      const w = S.byId(prev) || findWalls(S.getDoc())[0];
       if (w) f.points = JSON.parse(JSON.stringify(w.points));
     }
+  },
+  startSplit(f) {
+    setTool('split');
+    app.splitTarget = f.id;
+    toast('Draw a line across the area, then double-click (or press Enter).');
+  },
+  wallFromArea(f) {
+    const doc = S.getDoc();
+    const src = f.followWall ? S.byId(f.followWall) : f;
+    if (!src || src.points.length < 3) return;
+    const w = S.createFeature('wall', src.points, { name: (f.name || 'District') + ' Wall', smooth: !!src.smooth });
+    S.insertFeature(w);
+    if (!f.followWall) f.clipWall = w.id;
+    app.sel = w.id;
+    S.commit();
+    toast('Wall created — it is selected so you can adjust towers and thickness.');
   },
 };
 
@@ -314,7 +392,11 @@ canvas.addEventListener('pointerdown', (e) => {
   if (tool.draw === 'point') { placePoint(tool, snapPoint(w, true)); return; }
   if (tool.draw) {
     const p = snapPoint(w, e.altKey);
-    if (!app.drawing) app.drawing = { tool: tool.id, pts: [p] };
+    if (!app.drawing) {
+      const sel = app.sel && S.byId(app.sel);
+      const target = tool.id === 'split' ? app.splitTarget || (sel && (sel.type === 'district' || sel.type === 'farm') ? sel.id : null) : null;
+      app.drawing = { tool: tool.id, pts: [p], target };
+    }
     else {
       const first = app.drawing.pts[0];
       if (tool.draw === 'poly' && app.drawing.pts.length >= 3 && G.dist(toScreen(first), [sx, sy]) < 10) { finishDrawing(); return; }
@@ -514,7 +596,7 @@ function renderProps(body) {
       el('button', { class: 'danger', title: 'Delete (Del)', onclick: deleteSelected }, '🗑')),
   );
   body.append(head);
-  if (f.type === 'district' && f.followWall) body.append(el('p', { class: 'info' }, 'This district follows the city wall shape. Edit the wall to reshape it, or untick “Follow city wall”.'));
+  if (f.type === 'district' && f.followWall) body.append(el('p', { class: 'info' }, 'This district follows a wall’s shape. Edit the wall to reshape it, set “Shape follows” to its own outline, or split it into smaller districts with ✂.'));
   buildForm(body, SCHEMAS[f.type], f, {
     onInput: () => S.touch(),
     onCommit: () => S.commit('panel'),
@@ -524,33 +606,70 @@ function renderProps(body) {
   });
 }
 
+const TYPE_ICON = { wall: 'wall', district: 'district', farm: 'farm', water: 'water', river: 'river', road: 'road', plaza: 'plaza', building: 'building', landmark: 'landmark', label: 'label', compass: 'compass' };
+
 function renderLayers(body) {
   const doc = S.getDoc();
-  body.append(el('p', { class: 'info' }, 'Top of each group draws on top. Click a row to select it.'));
-  for (const type of [...S.RENDER_ORDER].reverse()) {
-    const items = doc.features.filter((f) => f.type === type);
-    if (!items.length) continue;
-    body.append(el('div', { class: 'heading' }, S.TYPE_LABELS[type] + (items.length > 1 ? ` (${items.length})` : '')));
-    for (const f of [...items].reverse()) {
-      const name = f.name || f.text || S.TYPE_LABELS[f.type];
-      const move = (dir) => {
-        const arr = doc.features, i = arr.indexOf(f);
-        let j = i + dir;
-        while (j >= 0 && j < arr.length && arr[j].type !== f.type) j += dir;
-        if (j < 0 || j >= arr.length) return;
-        [arr[i], arr[j]] = [arr[j], arr[i]];
+  body.append(el('p', { class: 'info' }, 'Top of the list draws on top. Drag rows (or use ▲▼) to reorder — e.g. put a lake above a river. Roads, rivers, lakes, walls and buildings placed above a district cut through its blocks. Area and river names always stay on top.'));
+  const list = el('div', { class: 'layers' });
+  const order = [...doc.features].reverse();
+  for (const f of order) {
+    const name = (f.name || f.text || S.TYPE_LABELS[f.type]).split('\n')[0];
+    const move = (dir) => {
+      const arr = doc.features, i = arr.indexOf(f), j = i + dir;
+      if (j < 0 || j >= arr.length) return;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+      S.commit();
+    };
+    const icon = el('span', { class: 'licon', title: S.TYPE_LABELS[f.type] });
+    icon.innerHTML = `<svg viewBox="0 0 24 24">${ICON[TYPE_ICON[f.type]] || ''}</svg>`;
+    const row = el('div', { class: 'layer' + (f.id === app.sel ? ' sel' : '') + (f.hidden ? ' hidden' : '') },
+      el('span', { class: 'grip', title: 'Drag to reorder' }, '⠿'), icon,
+      el('span', { class: 'lname', title: name }, name),
+      el('button', { title: 'Move up (draw above)', onclick: (e) => { e.stopPropagation(); move(1); } }, '▲'),
+      el('button', { title: 'Move down (draw below)', onclick: (e) => { e.stopPropagation(); move(-1); } }, '▼'),
+      el('button', { title: f.hidden ? 'Show' : 'Hide', onclick: (e) => { e.stopPropagation(); f.hidden = !f.hidden; S.commit(); } }, f.hidden ? '◌' : '◉'),
+      el('button', { title: f.locked ? 'Unlock' : 'Lock', onclick: (e) => { e.stopPropagation(); f.locked = !f.locked; S.commit(); } }, f.locked ? '🔒' : '🔓'));
+    row.dataset.id = f.id;
+    row.addEventListener('click', () => { if (row.dataset.dragged) return; app.sel = f.id; renderPanel(); requestRender(); });
+    row.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      const startY = e.clientY;
+      let drop = null, active = false;
+      const clear = () => list.querySelectorAll('.drop-above,.drop-below').forEach((r) => r.classList.remove('drop-above', 'drop-below'));
+      const move = (ev) => {
+        if (!active && Math.abs(ev.clientY - startY) < 5) return;
+        if (!active) { active = true; row.classList.add('dragging'); }
+        clear();
+        const tgt = [...list.children].find((r) => { const b = r.getBoundingClientRect(); return ev.clientY >= b.top && ev.clientY < b.bottom; });
+        if (!tgt || tgt === row) { drop = null; return; }
+        const b = tgt.getBoundingClientRect(), above = ev.clientY < b.top + b.height / 2;
+        tgt.classList.add(above ? 'drop-above' : 'drop-below');
+        drop = { id: tgt.dataset.id, above };
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        row.classList.remove('dragging');
+        clear();
+        if (!active) return;
+        row.dataset.dragged = '1';
+        setTimeout(() => { delete row.dataset.dragged; }, 0);
+        if (!drop) return;
+        const arr = doc.features, tgtF = arr.find((x) => x.id === drop.id);
+        arr.splice(arr.indexOf(f), 1);
+        // The list is shown top-first, so "above" in the list means later in the array.
+        arr.splice(arr.indexOf(tgtF) + (drop.above ? 1 : 0), 0, f);
         S.commit();
       };
-      const row = el('div', { class: 'layer' + (f.id === app.sel ? ' sel' : '') + (f.hidden ? ' hidden' : '') },
-        el('span', { class: 'lname', title: name }, name.split('\n')[0]),
-        el('button', { title: 'Move up', onclick: (e) => { e.stopPropagation(); move(1); } }, '▲'),
-        el('button', { title: 'Move down', onclick: (e) => { e.stopPropagation(); move(-1); } }, '▼'),
-        el('button', { title: f.hidden ? 'Show' : 'Hide', onclick: (e) => { e.stopPropagation(); f.hidden = !f.hidden; S.commit(); } }, f.hidden ? '◌' : '◉'),
-        el('button', { title: f.locked ? 'Unlock' : 'Lock', onclick: (e) => { e.stopPropagation(); f.locked = !f.locked; S.commit(); } }, f.locked ? '🔒' : '🔓'));
-      row.addEventListener('click', () => { app.sel = f.id; renderPanel(); requestRender(); });
-      body.append(row);
-    }
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+    list.append(row);
   }
+  body.append(list);
   if (!doc.features.length) body.append(el('p', { class: 'info' }, 'Nothing here yet — pick a tool on the left and start drawing.'));
 }
 
@@ -570,8 +689,11 @@ function renderMapSettings(body) {
     { k: 'fontTitle', label: 'Title font', t: 'select', options: fontOpts },
     { k: 'fontScript', label: 'Script font', t: 'select', options: fontOpts },
     { t: 'heading', label: 'Decoration' },
-    { k: 'frame', label: 'Ornamental frame', t: 'check' },
-    { k: 'frameWidth', label: 'Frame width', t: 'range', min: 4, max: 120, step: 1 },
+    { k: 'frame', label: 'Border', t: 'check' },
+    { k: 'frameStyle', label: 'Border style', t: 'select', options: [['solid', 'Solid'], ['ornate', 'Ornate (ladder)']] },
+    { k: 'frameWidth', label: 'Border width', t: 'range', min: 4, max: 120, step: 1 },
+    { k: 'haloWidth', label: 'Label halo', t: 'range', min: 0, max: 0.8, step: 0.01 },
+    { k: 'featureGap', label: 'Gap at rivers & walls', t: 'range', min: 0, max: 20, step: 0.5 },
     { k: 'fields', label: 'Countryside fields', t: 'check' },
     { k: 'fieldSize', label: 'Field size', t: 'range', min: 40, max: 600, step: 5 },
     { k: 'seed', label: 'Fields seed', t: 'seed' },
