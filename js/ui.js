@@ -28,6 +28,7 @@ export const SCHEMAS = {
     { k: 'tone', label: 'Tone', t: 'select', options: [['normal', 'Normal'], ['dark', 'Dark (slums, industry)'], ['light', 'Light (wealthy)'], ['park', 'Park']], show: (f) => (f.look || 'blocks') === 'blocks' },
     { k: 'color', label: 'Custom fill', t: 'color' },
     { k: 'hatch', label: 'Hatching', t: 'check', show: (f) => (f.look || 'blocks') === 'blocks' },
+    { k: 'border', label: 'Dark borders on blocks', t: 'check' },
     { k: 'borderStreet', label: 'Border street', t: 'range', min: 0, max: 20, step: 0.5 },
     { t: 'heading', label: 'Streets' },
     { k: 'blockSize', label: 'Block size', t: 'range', min: 8, max: 400, step: 1 },
@@ -39,7 +40,6 @@ export const SCHEMAS = {
     { k: 'gradMode', label: 'Block density', t: 'select', rebuild: true, options: [['none', 'Even'], ['edge', 'Tighter toward the edge'], ['center', 'Tighter toward the center']] },
     { k: 'gradStrength', label: 'Strength', t: 'range', min: 0, max: 1.5, step: 0.05, show: (f) => (f.gradMode || 'none') !== 'none' },
     { t: 'info', text: 'Blocks get smaller where the city is denser. The gradient is measured from the middle of this district unless it was generated with a city, which shares one center.', show: (f) => (f.gradMode || 'none') !== 'none' },
-    { k: 'popFactor', label: 'Population weight', t: 'range', min: 0, max: 3, step: 0.05 },
     { t: 'heading', label: 'More street options', collapsed: true },
     { k: 'look', label: 'Look', t: 'select', options: [['blocks', 'Buildings (blocks)'], ['garden', 'Park / garden (trees)'], ['cemetery', 'Cemetery (headstones)']], rebuild: true },
     { k: 'irregularity', label: 'Irregularity', t: 'range', min: 0, max: 1, step: 0.01 },
@@ -100,6 +100,7 @@ export const SCHEMAS = {
     { t: 'heading', label: 'Water' },
     { k: 'coastLines', label: 'Coast lines', t: 'range', min: 0, max: 8, step: 1 },
     GAP,
+    { k: 'border', label: 'Black border', t: 'check' },
     { k: 'smooth', label: 'Smooth shore', t: 'check' },
   ],
   river: [
@@ -116,6 +117,7 @@ export const SCHEMAS = {
     { k: 'wobble', label: 'Bank wobble', t: 'range', min: 0, max: 0.6, step: 0.01, show: (f) => !f.canal },
     { k: 'canal', label: 'Canal (stone-lined)', t: 'check', rebuild: true },
     GAP,
+    { k: 'border', label: 'Black border', t: 'check' },
     { k: 'smooth', label: 'Smooth curve', t: 'check' },
   ],
   road: [
@@ -126,6 +128,7 @@ export const SCHEMAS = {
     { k: 'gates', label: 'Gate where it crosses wall', t: 'check', show: (f) => f.kind !== 'rural' },
     { k: 'closed', label: 'Closed loop', t: 'check' },
     { k: 'smooth', label: 'Smooth curve', t: 'check' },
+    { k: 'border', label: 'Black outline', t: 'check' },
     { k: 'carve', label: 'Shape the districts around it', t: 'check' },
     { t: 'info', text: 'On: blocks are cut away around the road and nearby generated streets line up with it. Off: the road is simply drawn over the districts and leaves them untouched.' },
   ],
@@ -136,6 +139,7 @@ export const SCHEMAS = {
     { k: 'aspect', label: 'Width ÷ height', t: 'range', min: 0.3, max: 3, step: 0.05, show: (f) => f.shape === 'square' },
     { k: 'angle', label: 'Rotation', t: 'range', min: -90, max: 90, step: 1, show: (f) => f.shape === 'square' },
     { k: 'monument', label: 'Centerpiece', t: 'select', options: [['none', 'None'], ['dot', 'Statue (dot)'], ['ring', 'Ring'], ['fountain', 'Fountain'], ['obelisk', 'Obelisk'], ['tree', 'Tree / garden'], ['market', 'Market stalls']] },
+    { k: 'border', label: 'Black border', t: 'check' },
   ],
   building: [
     label('name'),
@@ -152,12 +156,14 @@ export const SCHEMAS = {
     { k: 'hatch', label: 'Hatching', t: 'check', show: (f) => f.style === 'district' },
     { k: 'color', label: 'Custom fill', t: 'color' },
     GAP,
+    { k: 'border', label: 'Black border', t: 'check' },
   ],
   cutout: [
     label('name'),
     { t: 'info', text: 'Removes this area from any district below it in the layer list: a hole, bay or notch cut out of the inside of a district. Move it above or below districts in Layers to choose what it cuts.' },
     { k: 'fill', label: 'Inside shows', t: 'select', options: [['none', 'Whatever is underneath'], ['street', 'Open ground (street color)'], ['park', 'Park']] },
     { k: 'gap', label: 'Gap around it', t: 'range', min: 0, max: 20, step: 0.5 },
+    { k: 'border', label: 'Black border', t: 'check' },
     { k: 'smooth', label: 'Smooth edges', t: 'check' },
   ],
   landmark: [

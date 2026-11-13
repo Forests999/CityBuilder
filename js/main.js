@@ -11,7 +11,6 @@ import * as SN from './snap.js';
 import { KITS, defaultKitState } from './kits.js';
 import { makeRng } from './rng.js';
 import { PRESETS } from './generate.js';
-import { estimatePopulation, formatPop } from './population.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#map');
@@ -1495,73 +1494,10 @@ function updateStatus() {
   $('#btnRedo').disabled = !S.canRedo();
 }
 
-// ---------- population estimate ----------
-let popTimer = null;
-function schedulePop() { clearTimeout(popTimer); popTimer = setTimeout(updatePop, 250); }
-
-function updatePop() {
-  let pop = null;
-  try { pop = estimatePopulation(S.getDoc()); } catch (e) { pop = null; }
-  app.pop = pop;
-  const b = $('#btnPop');
-  if (!pop || !pop.rows.length) {
-    b.textContent = '👥 —';
-    b.title = 'Population estimate: add some districts first. Click to set the density.';
-  } else {
-    b.textContent = '👥 ≈ ' + formatPop(pop.total);
-    b.title = `About ${Math.round(pop.total).toLocaleString()} people in ${pop.blocks.toLocaleString()} blocks (${pop.hectares.toFixed(1)} ha built up) at ${pop.density} people per hectare. Click to adjust.`;
-  }
-  if (!$('#popPanel').classList.contains('hidden')) renderPopPanel();
-}
-
-function renderPopPanel() {
-  const m = $('#popPanel'), s = S.getDoc().settings, pop = app.pop;
-  m.innerHTML = '';
-  const num = (key, min, max, step) => {
-    const i = el('input', { type: 'number', min, max, step, value: s[key] });
-    i.addEventListener('change', () => { const v = parseFloat(i.value); if (!isNaN(v) && v >= min) { s[key] = v; S.commit('panel'); } });
-    return i;
-  };
-  m.append(
-    el('div', { class: 'mhead' }, 'Population estimate'),
-    el('div', { class: 'poptotal' }, pop && pop.rows.length ? `≈ ${Math.round(pop.total).toLocaleString()} people` : 'No districts yet'),
-    el('label', { class: 'mrow' }, 'People per hectare ', num('popDensity', 0, 2000, 5)),
-    el('div', { class: 'mnote' }, 'of built-up area (the blocks, without streets). Medieval cities were roughly 100–250.'),
-    el('label', { class: 'mrow' }, '1 map unit = ', num('metersPerUnit', 0.05, 100, 0.05), ' metres'),
-    el('div', { class: 'mnote' }, 'Sets how big your map really is. Change it to scale the whole estimate.'));
-  if (pop && pop.rows.length) {
-    m.append(el('div', { class: 'mhead' }, 'By district'));
-    const list = el('div', { class: 'poprows' });
-    for (const r of [...pop.rows].sort((a, b) => b.people - a.people)) {
-      list.append(el('div', { class: 'poprow', onclick: () => { select(r.id); } },
-        el('span', { class: 'pn' }, r.name), el('span', { class: 'pb' }, `${r.blocks} blocks`), el('span', { class: 'pp' }, formatPop(r.people))));
-    }
-    m.append(list,
-      el('div', { class: 'mnote' }, 'Rough guide: it counts the blocks the street generator makes, so changing a district’s block size, style or “Population weight” changes it. Parks and cemeteries count as zero.'));
-  }
-}
-
-function togglePopPanel() {
-  const m = $('#popPanel');
-  if (!m.classList.contains('hidden')) { m.classList.add('hidden'); return; }
-  updatePop();
-  renderPopPanel();
-  const b = $('#btnPop').getBoundingClientRect();
-  m.classList.remove('hidden');
-  m.style.top = b.bottom + 6 + 'px';
-  m.style.left = Math.max(8, Math.min(b.left, window.innerWidth - m.offsetWidth - 8)) + 'px';
-}
-$('#btnPop').addEventListener('click', togglePopPanel);
-document.addEventListener('pointerdown', (e) => {
-  const m = $('#popPanel');
-  if (!m.classList.contains('hidden') && !m.contains(e.target) && e.target.id !== 'btnPop') m.classList.add('hidden');
-});
-
 // ---------- boot ----------
 S.onChange((kind, source) => {
   if (kind === 'doc') {
     pruneSel();
-    schedulePop();
     if (!(source === 'panel' && app.tab !== 'layers')) renderPanel();
   }
   requestRender();
@@ -1581,7 +1517,6 @@ resize();
 fitView();
 setTool('select');
 renderPanel();
-schedulePop();
 if (document.fonts) {
   for (const f of FONTS) document.fonts.load(`600 20px "${f}"`).catch(() => {});
   document.fonts.ready.then(requestRender);

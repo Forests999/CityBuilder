@@ -16,7 +16,7 @@ export const THEMES = {
     name: 'Patina & Amber (book)',
     colors: {
       paper: '#d9cfc4', field: '#b9a89a', ruralRoad: '#7b6a5b', block: '#524438', blockDark: '#343b40', blockLight: '#6b5a49',
-      park: '#526b68', hatch: '#2b241e', street: '#efe9e1', outline: '#2a2522', water: '#526b68', waterLine: '#3c5250',
+      park: '#526b68', hatch: '#1a1511', street: '#efe9e1', outline: '#2a2522', water: '#526b68', waterLine: '#3c5250',
       waterEdge: '#343b40', wall: '#343b40', label: '#2b2420', labelHalo: '#f6f1ea', waterText: '#f6f1ea', waterHalo: '#2f3d3b',
       accent: '#b77a36', frame: '#343b40', glow: '',
       farm1: '#c9b9a8', farm2: '#bfa98e', farm3: '#a9ab94', farmLine: '#8a7766', hedge: '#526b68',

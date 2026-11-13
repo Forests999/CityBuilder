@@ -397,8 +397,10 @@ function drawWater(ctx, f, sh, C, riverPolys) {
     g.strokeStyle = C.water; g.lineWidth = 2 * i * gap - 1.2; g.stroke();
   }
   g.restore();
-  g.beginPath(); addPath(g, sh, true);
-  g.strokeStyle = C.waterEdge; g.lineWidth = 2; g.stroke();
+  if (f.border !== false) {
+    g.beginPath(); addPath(g, sh, true);
+    g.strokeStyle = C.waterEdge; g.lineWidth = 2; g.stroke();
+  }
   if (riverPolys.length) {
     g.globalCompositeOperation = 'destination-out';
     g.fillStyle = '#000'; g.strokeStyle = '#000'; g.lineWidth = 3;
@@ -474,8 +476,10 @@ function drawRiver(target, f, sh, geo, C, lakes) {
   }
   ctx.setLineDash([]);
   ctx.restore();
-  ctx.beginPath(); addPath(ctx, L, false); addPath(ctx, R, false);
-  ctx.strokeStyle = C.waterEdge; ctx.lineWidth = f.canal ? 2.4 : 1.8; ctx.stroke();
+  if (f.border !== false) {
+    ctx.beginPath(); addPath(ctx, L, false); addPath(ctx, R, false);
+    ctx.strokeStyle = C.waterEdge; ctx.lineWidth = f.canal ? 2.4 : 1.8; ctx.stroke();
+  }
   if (ctx !== target) {
     ctx.globalCompositeOperation = 'destination-out';
     ctx.fillStyle = '#000';
@@ -631,15 +635,18 @@ export function renderMap(ctx, doc, o) {
   const towerCache = new Map();
   const towers = (w) => { if (!towerCache.has(w.id)) towerCache.set(w.id, wallTowers(w, shape.get(w.id))); return towerCache.get(w.id); };
   const cityRoadsAll = feats.filter((f) => f.type === 'road' && f.kind !== 'rural' && shape.get(f.id).length >= 2);
+  const allPlazas = feats.filter((f) => f.type === 'plaza' && f.points[0]);
 
   // Cut "carvers" out of a district layer. ex widens the cut (used for the block
   // layer so a rim of the outline layer shows through as the block outline).
-  function carve(g, carvers, ex) {
+  function carve(g, carvers, exAll) {
     g.save();
     g.globalCompositeOperation = 'destination-out';
     g.strokeStyle = '#000'; g.fillStyle = '#000';
     g.lineCap = 'round'; g.lineJoin = 'round';
     for (const f of carvers) {
+      // Shapes with their dark border turned off get no outline rim where they cut into the blocks.
+      const ex = f.border === false ? 0 : exAll;
       const sh = shape.get(f.id);
       if (f.type === 'road') {
         if (f.kind === 'rural' || sh.length < 2) continue;
@@ -688,7 +695,7 @@ export function renderMap(ctx, doc, o) {
       });
     }
     // Outer edge outline (only its outside half survives), then the street-colored ground.
-    for (const x of items) within(ctx, x, () => { ctx.beginPath(); addPath(ctx, x.sh, true); ctx.strokeStyle = C.outline; ctx.lineWidth = ow * 2; ctx.stroke(); });
+    for (const x of items) { if (x.d.border === false) continue; within(ctx, x, () => { ctx.beginPath(); addPath(ctx, x.sh, true); ctx.strokeStyle = C.outline; ctx.lineWidth = ow * 2; ctx.stroke(); }); }
     // One fill per wall-clip group, so neighbouring districts form a single shape with no hairline between them.
     // Cut-aways above the districts are erased from it so the hole really is open.
     const carvers = above.filter((f) => CARVERS[f.type] && !(f.type === 'road' && f.carve === false));
@@ -717,7 +724,7 @@ export function renderMap(ctx, doc, o) {
       for (const x of items) {
         within(g, x, () => {
           g.beginPath(); addPath(g, x.cs, true); g.clip();
-          if (!block) { g.fillStyle = C.outline; g.fill(); }
+          if (!block) { g.fillStyle = x.d.border === false ? (x.d.color || ((x.d.look || 'blocks') !== 'blocks' ? lawnColor(C) : toneColor(C, x.d.tone))) : C.outline; g.fill(); }
           else {
             const look = x.d.look || 'blocks';
             g.fillStyle = x.d.color || (look !== 'blocks' ? lawnColor(C) : toneColor(C, x.d.tone)); g.fill();
@@ -790,9 +797,9 @@ export function renderMap(ctx, doc, o) {
         }
       }
       g.strokeStyle = C.outline; g.fillStyle = C.outline;
-      strokeRoads(g, masked, ow * 2);
+      strokeRoads(g, masked.filter((r) => r.border !== false), ow * 2);
       g.beginPath();
-      for (const p of plazas) plazaPath(g, p, ow);
+      for (const p of plazas) if (p.border !== false) plazaPath(g, p, ow);
       g.fill();
     };
     if (!districts.length) lines(ctx, true);
@@ -819,10 +826,47 @@ export function renderMap(ctx, doc, o) {
         blit(ctx, g2);
       }
     }
-    // Roads set to leave the districts alone are drawn over them with their own outline.
-    if (free.length) { ctx.strokeStyle = C.outline; strokeRoads(ctx, free, ow * 2); }
+    // Roads set to leave the districts alone get their own layer: a softened outline that is cleared
+    // wherever another road or a plaza lies (so no stray borders across junctions), then the road
+    // surface, then the two ends faded out so they melt into the blocks beside them. An end that meets
+    // another road or plaza stays solid so the join is clean.
+    if (free.length) {
+      const g = getLayer(1, ctx);
+      g.lineCap = 'round'; g.lineJoin = 'round';
+      g.globalAlpha = 0.65; g.strokeStyle = C.outline;
+      strokeRoads(g, free.filter((r) => r.border !== false), ow * 2);
+      g.globalAlpha = 1;
+      g.globalCompositeOperation = 'destination-out'; g.strokeStyle = '#000'; g.fillStyle = '#000';
+      strokeRoads(g, cityRoadsAll, 0);
+      g.beginPath();
+      for (const p of allPlazas) plazaPath(g, p, 0);
+      g.fill();
+      g.globalCompositeOperation = 'source-over';
+      g.strokeStyle = C.street;
+      strokeRoads(g, free, 0);
+      g.globalCompositeOperation = 'destination-out';
+      for (const r of free) {
+        const sh = shape.get(r.id);
+        if (r.closed || sh.length < 2) continue;
+        for (const end of [0, 1]) {
+          const p = end ? sh[sh.length - 1] : sh[0], q = end ? sh[sh.length - 2] : sh[1];
+          const joins = cityRoadsAll.some((o) => o !== r && G.nearestOnPath(p, shape.get(o.id), o.closed).d < o.width / 2 + r.width / 2 + 2)
+            || allPlazas.some((pl) => G.dist(p, pl.points[0]) < pl.radius + r.width / 2 + 2);
+          if (joins) continue;
+          const dir = G.norm(G.sub(p, q)), L = Math.max(10, r.width * 1.6), half = r.width + 6;
+          g.save();
+          g.translate(p[0], p[1]); g.rotate(Math.atan2(dir[1], dir[0]));
+          const gr = g.createLinearGradient(-L, 0, r.width * 0.5, 0);
+          gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,1)');
+          g.fillStyle = gr; g.fillRect(-L, -half, L + r.width, 2 * half);
+          g.restore();
+        }
+      }
+      g.globalCompositeOperation = 'source-over';
+      blit(ctx, g);
+    }
     ctx.strokeStyle = C.street; ctx.fillStyle = C.street;
-    strokeRoads(ctx, city, 0);
+    strokeRoads(ctx, masked, 0);
     ctx.beginPath();
     for (const p of plazas) plazaPath(ctx, p, 0);
     ctx.fill();
@@ -907,14 +951,13 @@ export function renderMap(ctx, doc, o) {
     wl.beginPath(); for (const t of tw) circle(wl, t.p, t.r);
     wl.fillStyle = C.wall; wl.fill();
     wl.globalCompositeOperation = 'destination-out'; wl.lineCap = 'butt'; wl.strokeStyle = '#000';
-    for (const { r, x, sinT } of gates) { seg(wl, x, sinT, 3); wl.lineWidth = r.width + ow * 2; wl.stroke(); }
+    for (const { r, x, sinT } of gates) { seg(wl, x, sinT, 3); wl.lineWidth = r.width; wl.stroke(); }
     wl.globalCompositeOperation = 'source-over'; wl.lineCap = 'round';
     blit(ctx, wl);
-    // Passage floor with its two outline edges, kept to the wall's thickness.
+    // Passage floor: plain road color between the towers, no outlines, kept to the wall's thickness.
     const gl = getLayer(2, ctx);
     gl.lineCap = 'butt';
-    for (const { r, x, sinT } of gates) { seg(gl, x, sinT, 12); gl.strokeStyle = C.outline; gl.lineWidth = r.width + ow * 2; gl.stroke(); }
-    for (const { r, x, sinT } of gates) { seg(gl, x, sinT, 12); gl.strokeStyle = C.street; gl.lineWidth = r.width; gl.stroke(); }
+    for (const { r, x, sinT } of gates) { seg(gl, x, sinT, 12); gl.strokeStyle = C.street; gl.lineWidth = r.width + 0.5; gl.stroke(); }
     gl.globalCompositeOperation = 'destination-in';
     gl.strokeStyle = '#000'; strokeWall(gl);
     gl.globalCompositeOperation = 'source-over'; gl.lineCap = 'round';
@@ -947,14 +990,14 @@ export function renderMap(ctx, doc, o) {
           const a = Math.max(0, Math.min(1, (k - 0.35) / 0.8));
           if (a > 0) { ctx.globalAlpha = a; ctx.fillStyle = hatchPattern(ctx, C.hatch, S.hatchSpacing); ctx.fill(); ctx.globalAlpha = 1; }
         }
-        ctx.strokeStyle = C.outline; ctx.lineWidth = asBlock ? ow : ow * 1.3; ctx.stroke();
+        if (f.border !== false) { ctx.strokeStyle = C.outline; ctx.lineWidth = asBlock ? ow : ow * 1.3; ctx.stroke(); }
         break;
       }
       case 'cutout':
         if (sh.length < 3 || f.fill === 'none') break;
         ctx.beginPath(); addPath(ctx, sh, true);
         ctx.fillStyle = f.fill === 'park' ? C.park : C.street; ctx.fill();
-        ctx.strokeStyle = C.outline; ctx.lineWidth = ow; ctx.stroke();
+        if (f.border !== false) { ctx.strokeStyle = C.outline; ctx.lineWidth = ow; ctx.stroke(); }
         break;
       case 'wall': if (sh.length >= (f.closed === false ? 2 : 3)) drawWall(f); break;
       case 'landmark': {
