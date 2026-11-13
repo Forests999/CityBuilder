@@ -26,6 +26,10 @@
         <button id="btnRedo" title="Redo (Ctrl+Y)">↷</button>
         <button id="btnFit" title="Fit page to screen (Shift+F)">⤢ Fit</button>
       </div>
+      <div class="group snapgroup">
+        <button id="btnSnap" class="toggle" title="Snap to points, edges and alignment guides (Shift+G). Hold Alt to bypass for one action.">🧲 Snap</button>
+        <button id="btnSnapMenu" title="Snap and grid options">▾</button>
+      </div>
       <div class="spacer"></div>
       <div class="group">
         <select id="exportScale" title="Export resolution">
@@ -44,6 +48,7 @@
         <div class="tabs">
           <button data-tab="props" class="active">Properties</button>
           <button data-tab="layers">Layers</button>
+          <button data-tab="kits">Kits</button>
           <button data-tab="map">Map</button>
         </div>
         <div id="panelBody"></div>
@@ -84,6 +89,7 @@
             <tr><td><kbd>L</kbd></td><td>Landmark</td></tr>
             <tr><td><kbd>T</kbd></td><td>Text label</td></tr>
             <tr><td><kbd>C</kbd></td><td>Compass rose</td></tr>
+            <tr><td><kbd>Y</kbd></td><td>Street name (on a road)</td></tr>
           </table>
         </div>
         <div>
@@ -106,12 +112,16 @@
             <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Duplicate</td></tr>
             <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Y</kbd></td><td>Undo / redo</td></tr>
             <tr><td>Wheel · Space-drag</td><td>Zoom · pan</td></tr>
+            <tr><td>Shift-click / Shift-drag</td><td>Multi-select / box-select</td></tr>
+            <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>Select all</td></tr>
+            <tr><td><kbd>Shift</kbd>+<kbd>G</kbd></td><td>Snapping on / off</td></tr>
           </table>
         </div>
       </div>
       <p class="info">Your map autosaves in this browser. Use <b>Save</b> to download a <code>.city.json</code> you can re-open anywhere, and <b>Export PNG</b> for the finished image.</p>
     </div>
   </div>
+  <div id="snapMenu" class="menu hidden"></div>
   <div id="toast"></div>
   <input type="file" id="fileOpen" accept=".json,application/json" hidden>
   <input type="file" id="fileRef" accept="image/*" hidden>

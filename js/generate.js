@@ -7,23 +7,26 @@
 // stream, so two districts with the same seed and settings produce identical
 // streets wherever they meet. Splitting a district therefore leaves no seam.
 
-import { polyArea, centroid, bbox, pointInPoly, splitConvex, extentAlong, fromAngle, perp, norm, sub, dist, lerp, rotate, densify } from './geom.js';
+import { polyArea, centroid, bbox, pointInPoly, splitConvex, extentAlong, fromAngle, perp, norm, sub, dist, lerp, rotate, densify, inflatePoly, projSeg } from './geom.js';
 import { mulberry32, makeNoise } from './rng.js';
 
 export const PRESETS = {
-  standard:   { pattern: 'organic', blockSize: 38, streetWidth: 4,   irregularity: 0.6,  warp: 10, lots: false, courtyards: 0,    tone: 'normal', hatch: true },
-  dense:      { pattern: 'organic', blockSize: 20, streetWidth: 2.6, irregularity: 0.9,  warp: 7,  lots: false, courtyards: 0,    tone: 'dark',   hatch: true },
-  noble:      { pattern: 'radial',  blockSize: 70, streetWidth: 5.5, irregularity: 0.3,  warp: 5,  lots: false, courtyards: 0.25, tone: 'light',  hatch: true },
-  radial:     { pattern: 'radial',  blockSize: 40, streetWidth: 4,   irregularity: 0.45, warp: 6,  lots: false, courtyards: 0,    tone: 'normal', hatch: true },
-  grid:       { pattern: 'grid',    blockSize: 45, streetWidth: 4,   irregularity: 0.15, warp: 2,  lots: false, courtyards: 0,    tone: 'normal', hatch: true },
-  townhouses: { pattern: 'organic', blockSize: 60, streetWidth: 4.5, irregularity: 0.5,  warp: 3,  lots: true,  courtyards: 0.12, tone: 'normal', hatch: false },
-  industrial: { pattern: 'grid',    blockSize: 85, streetWidth: 5,   irregularity: 0.25, warp: 1,  lots: true,  courtyards: 0.05, tone: 'dark',   hatch: true },
-  park:       { pattern: 'organic', blockSize: 400, streetWidth: 3,  irregularity: 0.5,  warp: 4,  lots: false, courtyards: 0,    tone: 'park',   hatch: false },
+  standard:   { pattern: 'organic', blockSize: 38, streetWidth: 4,   irregularity: 0.6,  warp: 10, lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
+  dense:      { pattern: 'organic', blockSize: 20, streetWidth: 2.6, irregularity: 0.9,  warp: 7,  lots: false, courtyards: 0,    tone: 'dark',   hatch: true, look: 'blocks' },
+  noble:      { pattern: 'radial',  blockSize: 70, streetWidth: 5.5, irregularity: 0.3,  warp: 5,  lots: false, courtyards: 0.25, tone: 'light',  hatch: true, look: 'blocks' },
+  radial:     { pattern: 'radial',  blockSize: 40, streetWidth: 4,   irregularity: 0.45, warp: 6,  lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
+  grid:       { pattern: 'grid',    blockSize: 45, streetWidth: 4,   irregularity: 0.15, warp: 2,  lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
+  townhouses: { pattern: 'organic', blockSize: 60, streetWidth: 4.5, irregularity: 0.5,  warp: 3,  lots: true,  courtyards: 0.12, tone: 'normal', hatch: false, look: 'blocks' },
+  industrial: { pattern: 'grid',    blockSize: 85, streetWidth: 5,   irregularity: 0.25, warp: 1,  lots: true,  courtyards: 0.05, tone: 'dark',   hatch: true, look: 'blocks' },
+  market:     { pattern: 'grid',    blockSize: 26, streetWidth: 2.4, irregularity: 0.2,  warp: 1.5, lots: true,  courtyards: 0.2,  tone: 'light',  hatch: false, look: 'blocks' },
+  cemetery:   { pattern: 'grid',    blockSize: 80, streetWidth: 2.2, irregularity: 0.1,  warp: 2,  lots: false, courtyards: 0,    tone: 'park',   hatch: false, look: 'cemetery', graveSpacing: 8 },
+  park:       { pattern: 'organic', blockSize: 110, streetWidth: 2.2, irregularity: 0.6, warp: 14, lots: false, courtyards: 0,    tone: 'park',   hatch: false, look: 'garden', treeSpacing: 15, treeDensity: 0.55 },
 };
 
 export const PRESET_LABELS = {
   standard: 'Standard quarter', dense: 'Dense slums', noble: 'Noble estates', radial: 'Radial rings',
-  grid: 'Planned grid', townhouses: 'Townhouses & lots', industrial: 'Docks / industry', park: 'Park / gardens',
+  grid: 'Planned grid', townhouses: 'Townhouses & lots', industrial: 'Docks / industry', market: 'Market (stalls & lots)',
+  cemetery: 'Cemetery', park: 'Park / garden',
 };
 
 const ROOT = [[-8000, -8000], [18000, -8000], [18000, 18000], [-8000, 18000]];
@@ -38,14 +41,81 @@ function remember(key, make) {
 }
 const shapeKey = (shape) => shape.map((p) => Math.round(p[0]) + ',' + Math.round(p[1])).join(';');
 
-export function districtGen(f, shape, center) {
-  const key = ['d', f.pattern, f.blockSize, f.streetWidth, f.irregularity, f.warp, f.gridAngle, f.lots, f.courtyards, f.seed,
+// Prepare hand-drawn roads and rivers (as polylines) for street alignment: thin them out
+// so the per-cut distance test stays cheap, and fingerprint them for the cache key.
+export function prepGuides(polys) {
+  const list = [];
+  let h = 17;
+  for (const poly of polys) {
+    if (!poly || poly.length < 2) continue;
+    const pts = [poly[0]];
+    for (let i = 1; i < poly.length; i++) if (dist(pts[pts.length - 1], poly[i]) >= 14 || i === poly.length - 1) pts.push(poly[i]);
+    if (pts.length < 2) continue;
+    list.push({ pts, bb: bbox(pts) });
+    for (const p of pts) h = h32(h, (Math.round(p[0] / 3) * 73856093) ^ (Math.round(p[1] / 3) * 19349663));
+  }
+  return { list, key: list.length + ':' + h };
+}
+
+export function districtGen(f, shape, center, guides) {
+  const look = f.look || 'blocks';
+  const key = ['d', f.pattern, f.blockSize, f.streetWidth, f.irregularity, f.warp, f.gridAngle, f.lots, f.courtyards, f.seed, look,
+    look === 'garden' ? f.treeSpacing + ',' + f.treeDensity : look === 'cemetery' ? f.graveSpacing : '',
+    guides && guides.list.length ? guides.key : '',
     f.pattern === 'radial' ? center.map(Math.round).join(',') : '', shapeKey(shape)].join('|');
-  return remember(key, () => subdivide(shape, {
-    pattern: f.pattern, blockSize: Math.max(6, +f.blockSize || 38), streetWidth: +f.streetWidth || 4,
-    irregularity: +f.irregularity || 0, warp: +f.warp || 0, gridAngle: +f.gridAngle || 0,
-    lots: !!f.lots, courtyards: +f.courtyards || 0, seed: (f.seed >>> 0) || 1, center,
-  }));
+  return remember(key, () => {
+    const g = subdivide(shape, {
+      pattern: f.pattern, blockSize: Math.max(6, +f.blockSize || 38), streetWidth: +f.streetWidth || 4,
+      irregularity: +f.irregularity || 0, warp: +f.warp || 0, gridAngle: +f.gridAngle || 0,
+      lots: !!f.lots, courtyards: +f.courtyards || 0, seed: (f.seed >>> 0) || 1, center,
+      leaves: look !== 'blocks', guides: guides && guides.list.length ? guides.list : null,
+    });
+    g.decor = look !== 'blocks' ? lookDecor(f, shape, g, look) : null;
+    return g;
+  });
+}
+
+// Trees (garden) or graves (cemetery), scattered inside the generated cells.
+function lookDecor(f, shape, g, look) {
+  const seed = (f.seed >>> 0) || 1;
+  const rnd = mulberry32(seed ^ 0x7ee5), nz = makeNoise((seed ^ 0x3131) >>> 0);
+  const trees = [], graves = [];
+  const totalArea = g.leaves.reduce((s, l) => s + Math.abs(polyArea(l)), 0);
+  const base = look === 'garden' ? Math.max(7, +f.treeSpacing || 15) : Math.max(5, +f.graveSpacing || 8);
+  const est = totalArea / (base * base * (look === 'garden' ? 1 : 1.35));
+  const sp = est > 9000 ? base * Math.sqrt(est / 9000) : base;
+  const dens = Math.max(0, Math.min(1, f.treeDensity == null ? 0.55 : +f.treeDensity));
+  for (const leaf of g.leaves) {
+    const inner = inflatePoly(leaf, look === 'garden' ? -4 : -5);
+    if (polyArea(inner) * polyArea(leaf) <= 0 || Math.abs(polyArea(inner)) < 20) continue;
+    if (look === 'garden') {
+      const b = bbox(inner);
+      for (let y = b.y0 + sp / 2; y < b.y1; y += sp) {
+        for (let x = b.x0 + sp / 2; x < b.x1; x += sp) {
+          const p = [x + (rnd() - 0.5) * sp * 0.8, y + (rnd() - 0.5) * sp * 0.8];
+          const grove = (nz(p[0] / 90, p[1] / 90) + 1) / 2;
+          if (rnd() > dens * (0.25 + 1.1 * grove)) continue;
+          if (!pointInPoly(p, inner) || !pointInPoly(p, shape)) continue;
+          trees.push([p[0], p[1], sp * (0.28 + rnd() * 0.22), rnd()]);
+        }
+      }
+    } else {
+      // Rows of headstones aligned with the plot's longest edge.
+      let bi = 0, bl = 0;
+      for (let i = 0; i < inner.length; i++) { const L = dist(inner[i], inner[(i + 1) % inner.length]); if (L > bl) { bl = L; bi = i; } }
+      const e = sub(inner[(bi + 1) % inner.length], inner[bi]), ang = Math.atan2(e[1], e[0]);
+      const c = centroid(inner), bb = bbox(inner), R = Math.hypot(bb.x1 - bb.x0, bb.y1 - bb.y0) / 2;
+      for (let gu = -R; gu <= R; gu += sp) {
+        for (let gv = -R; gv <= R; gv += sp * 1.35) {
+          const q = rotate([gu, gv], ang), p = [c[0] + q[0], c[1] + q[1]];
+          if (rnd() < 0.07 || !pointInPoly(p, inner) || !pointInPoly(p, shape)) continue;
+          graves.push([p[0], p[1], ang + (rnd() - 0.5) * 0.08, sp * 0.36, sp * 0.52]);
+        }
+      }
+    }
+  }
+  trees.sort((a, b) => a[1] - b[1]);
+  return { trees, graves };
 }
 
 export function farmGen(f, shape, center) {
@@ -122,14 +192,36 @@ function subdivide(shape, o) {
     return rotate(longestAxisNormal(poly, 12), (rnd() - 0.5) * irr * 0.5);
   }
 
+  // Hand-drawn roads and rivers steer nearby cuts: streets end up running parallel to,
+  // or crossing at right angles to, the road they sit next to. The pull fades with distance.
+  const infl = bs * 5 + 20;
+  const guides = o.guides ? o.guides.filter((gd) => gd.bb.x1 >= sb.x0 - infl && gd.bb.x0 <= sb.x1 + infl && gd.bb.y1 >= sb.y0 - infl && gd.bb.y0 <= sb.y1 + infl) : [];
+  function steer(n, c) {
+    let bd = infl, dir = null;
+    for (const gd of guides) {
+      if (c[0] < gd.bb.x0 - bd || c[0] > gd.bb.x1 + bd || c[1] < gd.bb.y0 - bd || c[1] > gd.bb.y1 + bd) continue;
+      for (let i = 0; i < gd.pts.length - 1; i++) {
+        const r = projSeg(c, gd.pts[i], gd.pts[i + 1]);
+        if (r.d < bd) { bd = r.d; dir = norm(sub(gd.pts[i + 1], gd.pts[i])); }
+      }
+    }
+    if (!dir) return n;
+    const w = Math.max(0, Math.min(1, 1.15 - bd / infl));
+    const pa = dir, pb = perp(dir);
+    let t = Math.abs(n[0] * pa[0] + n[1] * pa[1]) >= Math.abs(n[0] * pb[0] + n[1] * pb[1]) ? pa : pb;
+    if (n[0] * t[0] + n[1] * t[1] < 0) t = [-t[0], -t[1]];
+    return norm([n[0] * (1 - w) + t[0] * w, n[1] * (1 - w) + t[1] * w]);
+  }
+
   // Cut straight across the longest edge, near its middle: gives squarish,
   // T-junctioned blocks instead of slivers.
-  function edgeCut(poly, spread, jitter, rnd) {
+  function edgeCut(poly, spread, jitter, rnd, steered) {
     const m = poly.length;
     let bi = 0, bl = 0;
     for (let i = 0; i < m; i++) { const L = dist(poly[i], poly[(i + 1) % m]); if (L > bl) { bl = L; bi = i; } }
     const a = poly[bi], b = poly[(bi + 1) % m];
-    const n = rotate(norm(sub(b, a)), (rnd() - 0.5) * jitter);
+    let n = rotate(norm(sub(b, a)), (rnd() - 0.5) * jitter);
+    if (steered && guides.length) n = steer(n, centroid(poly));
     return splitConvex(poly, lerp(a, b, 0.5 + (rnd() - 0.5) * spread), n);
   }
 
@@ -169,7 +261,7 @@ function subdivide(shape, o) {
     const area = Math.abs(polyArea(poly));
     if (area < target * (0.6 + rnd() * 0.9) || depth > 60 || count > MAX) { count++; leaf(poly, hash); continue; }
     const r = o.pattern === 'organic'
-      ? edgeCut(poly, 0.1 + irr * 0.5, irr * 0.6, rnd)
+      ? edgeCut(poly, 0.1 + irr * 0.5, irr * 0.6, rnd, true)
       : cut(poly, chooseNormal(poly, centroid(poly), rnd), 0.1 + irr * 0.6, rnd);
     if (!r) { count++; leaf(poly, hash); continue; }
     chords.push([r[2], r[3]]);

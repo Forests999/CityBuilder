@@ -88,3 +88,12 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 - **Label borders** can be set per label (or left on the map default); river names have their own opacity.
 - **Compass** is a classic faceted rose and can be rotated in its properties.
 - Splitting a district also adds a wider street along the cut (delete it in Layers if unwanted).
+
+## Kits, selection and snapping
+
+- **Kits tab:** ready-made groups placed with one click: *City center* (larger civic blocks, sparse parks, main roads out from a central plaza), *Market square* (stall-filled plaza inside a market quarter), *Cemetery* (headstone rows, low wall, gate road, chapel), *Park & garden* (trees, paths, pond, fountain) and *Fortified keep*. Each has a size and seed, and arrives selected together so you can drag it into place.
+- **Multi-select:** Shift-click to add or remove, Shift-drag on empty map to box-select, Ctrl+A for everything. Drag any selected item to move them all; the panel offers align (left/center/right/top/middle/bottom), distribute, group/ungroup, duplicate, hide, lock and delete. Kit pieces are grouped; *Select group* in an item's panel selects the rest.
+- **District looks:** *Market* (small lots and open squares), *Cemetery* and *Park / garden* presets. Park and cemetery districts fill with trees or headstones; spacing is adjustable.
+- **Align streets to roads:** generated organic streets near a hand-drawn road or river run parallel or at right angles to it (toggle per district; grid and radial patterns ignore it on purpose).
+- **Street names (Y):** click a road to add a name that runs along its curve; drag it to slide it along.
+- **Snap (toolbar, Shift+G):** snaps to corner points and onto edges, shows alignment guides when points line up horizontally or vertically, optional grid, and Shift while drawing locks to 15° steps. Hold Alt to bypass for one action. All of it can be switched off in the Snap menu.

@@ -6,7 +6,7 @@
 // block outlines then wrap neatly around every street, plaza and riverbank.
 
 import * as G from './geom.js';
-import { districtGen, farmGen, fieldsGen } from './generate.js';
+import { districtGen, farmGen, fieldsGen, prepGuides } from './generate.js';
 import { THEMES, FONT_WEIGHTS } from './themes.js';
 import { makeNoise, hashStr, mulberry32 } from './rng.js';
 
@@ -222,6 +222,7 @@ export const LABEL_STYLES = {
   district: { name: 'District (large, spaced)', font: 'fontLabel', fill: 'label', halo: 'labelHalo', upper: true },
   place: { name: 'Place (small caps)', font: 'fontLabel', fill: 'label', halo: 'labelHalo', upper: true },
   gate: { name: 'Outside / gate (accent)', font: 'fontLabel', fill: 'accent', halo: 'labelHalo', upper: true },
+  street: { name: 'Street name (small, runs along a road)', font: 'fontLabel', fill: 'outline', halo: 'street', upper: true },
   water: { name: 'Water', font: 'fontLabel', fill: 'waterText', halo: 'waterHalo', upper: true },
   ink: { name: 'Plain ink', font: 'fontLabel', fill: 'outline', halo: null, upper: false },
   script: { name: 'Script (italic)', font: 'fontScript', fill: 'outline', halo: 'labelHalo', upper: false, italic: true },
@@ -231,6 +232,38 @@ export const LABEL_STYLES = {
 // ---------- geometry caches per render ----------
 function toneColor(C, tone) {
   return tone === 'dark' ? C.blockDark : tone === 'light' ? C.blockLight : tone === 'park' ? C.park : C.block;
+}
+
+function mixColor(a, b, t) {
+  const pa = /^#([0-9a-f]{6})$/i.exec(a || ''), pb = /^#([0-9a-f]{6})$/i.exec(b || '');
+  if (!pa || !pb) return a;
+  const ch = (s, i) => parseInt(s.slice(i, i + 2), 16);
+  const m = (i) => Math.round(ch(pa[1], i) * (1 - t) + ch(pb[1], i) * t).toString(16).padStart(2, '0');
+  return '#' + m(0) + m(2) + m(4);
+}
+const lawnColor = (C) => mixColor(C.park, C.paper, 0.5);
+
+function drawTrees(g, trees, C) {
+  if (!trees.length) return;
+  g.beginPath();
+  for (const [x, y, r] of trees) { g.moveTo(x + r, y); g.arc(x, y, r, 0, Math.PI * 2); }
+  g.fillStyle = C.park; g.fill();
+  g.strokeStyle = C.outline; g.globalAlpha = 0.75; g.lineWidth = 0.8; g.stroke(); g.globalAlpha = 1;
+  g.beginPath();
+  for (const [x, y, r] of trees) { const hr = r * 0.42; g.moveTo(x - r * 0.3 + hr, y - r * 0.3); g.arc(x - r * 0.3, y - r * 0.3, hr, 0, Math.PI * 2); }
+  g.fillStyle = mixColor(C.park, C.paper, 0.4); g.fill();
+}
+
+function drawGraves(g, graves, C, S) {
+  if (!graves.length) return;
+  g.beginPath();
+  for (const [x, y, a, w, h] of graves) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const q = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map((p) => [x + p[0] * c - p[1] * s, y + p[0] * s + p[1] * c]);
+    g.moveTo(q[0][0], q[0][1]); g.lineTo(q[1][0], q[1][1]); g.lineTo(q[2][0], q[2][1]); g.lineTo(q[3][0], q[3][1]); g.closePath();
+  }
+  g.fillStyle = C.street; g.fill();
+  g.strokeStyle = C.outline; g.globalAlpha = 0.8; g.lineWidth = Math.max(0.5, S.outline * 0.55); g.stroke(); g.globalAlpha = 1;
 }
 
 function riverGeom(f, sh) {
@@ -586,6 +619,10 @@ export function renderMap(ctx, doc, o) {
   };
   const riverCache = new Map();
   const riverGeo = (f) => { if (!riverCache.has(f.id)) riverCache.set(f.id, riverGeom(f, shape.get(f.id))); return riverCache.get(f.id); };
+  // Roads and rivers that nearby generated streets line up with.
+  let guidesCache = null;
+  const getGuides = () => guidesCache || (guidesCache = prepGuides(
+    feats.filter((f) => (f.type === 'road' && f.kind !== 'rural') || f.type === 'river').map((f) => shape.get(f.id)).filter((s) => s.length >= 2)));
   let riverPolysCache = null;
   const riverPolys = () => riverPolysCache || (riverPolysCache = feats.filter((f) => f.type === 'river' && shape.get(f.id).length >= 2).map((f) => riverGeo(f).poly));
   // Slightly inset so a river's fill overlaps the lake's fill by a hair (no antialiasing line where they meet).
@@ -639,7 +676,7 @@ export function renderMap(ctx, doc, o) {
     // Clip with a hair-wider outline so abutting districts overlap slightly and no antialiasing seam shows between them.
     for (const x of items) x.cs = G.inflatePoly(x.sh, 0.9);
     if (!items.length) return;
-    for (const x of items) x.g = districtGen(x.d, x.sh, center);
+    for (const x of items) x.g = districtGen(x.d, x.sh, center, x.d.alignRoads ? getGuides() : null);
     const within = (g, x, fn) => { g.save(); if (x.clip) x.clip(g); fn(); g.restore(); };
     if (S.glow && C.glow) {
       for (const x of items) within(ctx, x, () => {
@@ -680,8 +717,9 @@ export function renderMap(ctx, doc, o) {
           g.beginPath(); addPath(g, x.cs, true); g.clip();
           if (!block) { g.fillStyle = C.outline; g.fill(); }
           else {
-            g.fillStyle = x.d.color || toneColor(C, x.d.tone); g.fill();
-            if (x.d.hatch && S.hatch && C.hatch) {
+            const look = x.d.look || 'blocks';
+            g.fillStyle = x.d.color || (look !== 'blocks' ? lawnColor(C) : toneColor(C, x.d.tone)); g.fill();
+            if (look === 'blocks' && x.d.hatch && S.hatch && C.hatch) {
               const a = Math.max(0, Math.min(1, (k - 0.35) / 0.8));
               if (a > 0) { g.globalAlpha = a; g.fillStyle = hatchPattern(g, C.hatch, S.hatchSpacing); g.fill(); g.globalAlpha = 1; }
             }
@@ -690,6 +728,9 @@ export function renderMap(ctx, doc, o) {
               for (const l of x.g.lots) addPath(g, l, false);
               g.strokeStyle = C.outline; g.lineWidth = ow * 0.7; g.globalAlpha = 0.75; g.stroke(); g.globalAlpha = 1;
             }
+            // Trees / headstones are painted before the streets are cut, so paths and roads stay clear.
+            if (look === 'garden' && x.g.decor) drawTrees(g, x.g.decor.trees, C);
+            else if (look === 'cemetery' && x.g.decor) drawGraves(g, x.g.decor.graves, C, S);
           }
           g.globalCompositeOperation = 'destination-out';
           g.strokeStyle = '#000'; g.fillStyle = '#000';
@@ -908,6 +949,15 @@ export function renderMap(ctx, doc, o) {
         const c = f.points[0];
         if (!c) break;
         const st = LABEL_STYLES[f.style] || LABEL_STYLES.district;
+        // A street name attached to a road is set along the road's own curve.
+        if (f.pathId && shape.has(f.pathId) && shape.get(f.pathId).length >= 2) {
+          const pp = drawTextOnPath(ctx, shape.get(f.pathId), f.text, {
+            pos: f.pathPos == null ? 0.5 : f.pathPos, size: f.size, spacing: f.spacing, family: fam(st.font),
+            fill: f.color || C[st.fill], halo: st.halo ? C[st.halo] : null, haloW: f.size * haloOf(f),
+          });
+          if (pp) hits.push({ id: f.id, kind: 'pathpos', poly: pp });
+          break;
+        }
         const poly = drawText(ctx, f.text, c[0], c[1], {
           size: f.size, angle: f.angle, spacing: f.spacing, family: fam(st.font), upper: st.upper, italic: st.italic,
           fill: f.color || C[st.fill], halo: st.halo ? C[st.halo] : null, haloW: f.size * haloOf(f),

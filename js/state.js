@@ -23,6 +23,7 @@ export const DEFAULTS = {
   district: {
     name: 'New District', showLabel: true, labelSize: 42, labelAngle: 0, labelSpacing: 0.12, labelOffset: [0, 0], halo: null,
     preset: 'standard', ...PRESETS.standard, gridAngle: 0, color: '', borderStreet: 3,
+    treeSpacing: 15, treeDensity: 0.55, graveSpacing: 8, alignRoads: true,
     smooth: false, followWall: '', clipWall: '', seed: 1,
   },
   cutout: { name: '', fill: 'none', gap: 0, smooth: false },
@@ -40,7 +41,7 @@ export const DEFAULTS = {
     shape: 'free', size: 24, aspect: 1.5, inner: 0.45, angle: 0,
   },
   landmark: { name: 'Landmark', size: 6, showLabel: true, labelSize: 20, labelOffset: [0, -28], halo: null },
-  label: { text: 'Label', style: 'district', size: 40, angle: 0, spacing: 0.12, color: '', halo: null },
+  label: { text: 'Label', style: 'district', size: 40, angle: 0, spacing: 0.12, color: '', halo: null, pathId: '', pathPos: 0.5 },
   compass: { size: 120, angle: 0 },
 };
 
@@ -53,7 +54,7 @@ export function defaultSettings() {
 }
 
 export function blankDoc() {
-  return { version: 2, meta: { title: 'New City', width: 3000, height: 2200 }, settings: defaultSettings(), features: [] };
+  return { version: 3, meta: { title: 'New City', width: 3000, height: 2200 }, settings: defaultSettings(), features: [] };
 }
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -90,7 +91,8 @@ function migrate(doc, version) {
     if (f.followWall === true) f.followWall = firstWall ? firstWall.id : '';
     if (f.followWall === false || f.followWall == null) f.followWall = '';
   }
-  doc.version = 2;
+  if (version < 3) for (const f of doc.features) if (f.type === 'district') f.alignRoads = false;
+  doc.version = 3;
 }
 
 function normalize(d) {

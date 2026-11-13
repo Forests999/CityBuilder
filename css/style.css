@@ -121,3 +121,21 @@ button.wide { display: block; width: 100%; margin: 6px 0; text-align: left; }
 #tools::-webkit-scrollbar { width: 6px; }
 #tools::-webkit-scrollbar-thumb { background: #4a4b54; border-radius: 3px; }
 #tools::-webkit-scrollbar-track { background: transparent; }
+
+button.toggle.on { background: #2f5a86; border-color: #4a8fd1; }
+.snapgroup { gap: 0; }
+.snapgroup #btnSnap { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.snapgroup #btnSnapMenu { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 0; padding: 5px 7px; }
+.menu { position: fixed; z-index: 40; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 280px; box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+.menu.hidden { display: none; }
+.menu .mhead { margin: 6px 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.menu .mrow { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; }
+.menu .mrow input[type=number] { width: 70px; background: #1c1d21; color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; }
+.menu .mnote { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.btnrow.wrap { flex-wrap: wrap; }
+.groupbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; background: #2a2f3a; border: 1px solid #3b4456; border-radius: 6px; padding: 6px 8px; margin: 6px 0; font-size: 12px; }
+.groupbar span { flex: 1 1 100%; color: #c9cfdb; }
+.groupbar button { padding: 2px 8px; font-size: 12px; }
+.layer.grouped .lname { border-left: 2px solid #7a8cb0; padding-left: 6px; }
+.kit { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px 10px; margin: 10px 0; background: #26272d; }
+.kit h4 { margin: 4px 0 2px; font-size: 14px; }

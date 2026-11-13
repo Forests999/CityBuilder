@@ -7,6 +7,8 @@ import { SCHEMAS, buildForm, el } from './ui.js';
 import { randomCity } from './starter.js';
 import { shapePoints } from './shapes.js';
 import { THEMES, COLOR_KEYS, FONTS } from './themes.js';
+import * as SN from './snap.js';
+import { KITS, defaultKitState } from './kits.js';
 
 const $ = (s) => document.querySelector(s);
 const canvas = $('#map');
@@ -14,7 +16,16 @@ const ctx = canvas.getContext('2d');
 const view = { s: 0.3, ox: 0, oy: 0 };
 let dpr = window.devicePixelRatio || 1;
 
-const app = { tool: 'select', sel: null, drawing: null, drag: null, hover: null, snap: null, hits: [], space: false, mouse: null, tab: 'props' };
+// `sel` is the primary selected feature; `selSet` holds every selected feature (shift-click, box-select, groups).
+// Assigning `app.sel = id` selects just that one.
+const app = {
+  tool: 'select', _sel: null, selSet: new Set(), drawing: null, drag: null, hover: null, snap: null, guides: { gx: null, gy: null },
+  hits: [], space: false, mouse: null, tab: 'props', marquee: null, kit: null, kitState: defaultKitState(),
+};
+Object.defineProperty(app, 'sel', {
+  get() { return this._sel; },
+  set(v) { this._sel = v || null; this.selSet = new Set(v ? [v] : []); },
+});
 const ref = { img: null, src: null, opacity: 0.5, visible: true, x: 0, y: 0, scale: 1 };
 
 const ICON = {
@@ -32,6 +43,7 @@ const ICON = {
   building: '<path d="M5 7h9v4h5v8H5z"/>',
   landmark: '<circle cx="12" cy="9" r="3.5"/><path d="M12 13v8"/>',
   label: '<path d="M5 5h14M12 5v14M9 19h6"/>',
+  streetName: '<path d="M3 18c5-9 11-9 18-3"/><path d="M8 12.5l.8 3M12 11.5l.4 3M16 12.5l-.4 3"/>',
   compass: '<circle cx="12" cy="12" r="9"/><path d="M12 4l2.5 8-2.5 8-2.5-8z"/>',
   split: '<path d="M4 6l9-3 7 6-3 11-11-2z" opacity=".5"/><path d="M3 20L21 4" stroke-dasharray="3 2"/>',
   cutout: '<path d="M4 6l9-3 7 6-3 11-11-2z" opacity=".5"/><circle cx="12" cy="12" r="3.5" stroke-dasharray="2.5 2"/>',
@@ -40,7 +52,7 @@ const ICON = {
 };
 
 const TOOLS = [
-  { id: 'select', key: 'v', label: 'Select & move', hint: 'Click to select · drag to move · drag empty space to pan · double-click an edge to add a point · right-click a point to delete it · Alt-click to cycle overlapping items' },
+  { id: 'select', key: 'v', label: 'Select & move', hint: 'Click to select · Shift-click to add or remove · Shift-drag to box-select · drag to move · drag empty space to pan · double-click an edge to add a point · right-click a point to delete it · Alt-click to cycle overlapping items' },
   { id: 'wall', key: 'w', type: 'wall', draw: 'poly', label: 'City wall', hint: 'Click to place wall corners · drag to sketch freehand · click the first point, double-click or Enter to close' },
   { id: 'district', key: 'd', type: 'district', draw: 'poly', label: 'District', hint: 'Outline a district; streets are generated inside it. Click the first point or double-click to finish' },
   { id: 'split', key: 'k', draw: 'line', label: 'Split district', hint: 'Draw a line across a district or farmland to break it in two (only the selected one, if any) · double-click / Enter to cut' },
@@ -49,7 +61,7 @@ const TOOLS = [
   { id: 'water', key: 'a', type: 'water', draw: 'poly', label: 'Lake / sea / bay', hint: 'Outline a body of water (drag to sketch a coastline) · double-click to finish' },
   { id: 'river', key: 'f', type: 'river', draw: 'line', label: 'River', hint: 'Click points along the river (or drag freehand) · double-click / Enter to finish' },
   { id: 'canal', key: 'n', type: 'river', draw: 'line', label: 'Canal', extra: { canal: true, width: 15, name: '', showLabel: false, smooth: false }, hint: 'Click points along the canal · double-click to finish' },
-  { id: 'road', key: 'r', type: 'road', draw: 'line', label: 'Avenue', extra: { kind: 'avenue', width: 13 }, hint: 'Click points along the avenue; it snaps to plazas and other roads (hold Alt to not snap) · double-click to finish' },
+  { id: 'road', key: 'r', type: 'road', draw: 'line', label: 'Avenue', extra: { kind: 'avenue', width: 13 }, hint: 'Click points along the avenue; it snaps to other points and edges (hold Alt to not snap, Shift for 15° steps) · double-click to finish' },
   { id: 'street', key: 's', type: 'road', draw: 'line', label: 'Street', extra: { kind: 'street', width: 6, ruralOutside: false }, hint: 'Draw a hand-placed street · double-click to finish' },
   { id: 'rural', key: 'u', type: 'road', draw: 'line', label: 'Country road', extra: { kind: 'rural', width: 6 }, hint: 'Thin road through the countryside · double-click to finish' },
   { id: 'plaza', key: 'p', type: 'plaza', draw: 'point', label: 'Round plaza', hint: 'Click to place a round plaza' },
@@ -58,7 +70,9 @@ const TOOLS = [
   { id: 'buildingShape', key: 'j', type: 'building', draw: 'point', label: 'Building shape (star, square, round…)', extra: { shape: 'star8', size: 28, style: 'solid' }, hint: 'Click to place a preset building shape; change the shape, size and look in the panel' },
   { id: 'landmark', key: 'l', type: 'landmark', draw: 'point', label: 'Landmark', hint: 'Click to place a labelled landmark dot' },
   { id: 'label', key: 't', type: 'label', draw: 'point', label: 'Text label', hint: 'Click to place a label, then type its text in the panel' },
+  { id: 'streetName', key: 'y', type: 'label', draw: 'point', label: 'Street name', hint: 'Click on a road to add a street name that runs along it (drag it to slide it along the road)' },
   { id: 'compass', key: 'c', type: 'compass', draw: 'point', label: 'Compass rose', hint: 'Click to place a compass rose' },
+  { id: 'kit', hidden: true, draw: 'point', label: 'Place kit', hint: 'Click where the kit should go · Esc cancels' },
 ];
 const toolById = (id) => TOOLS.find((t) => t.id === id);
 
@@ -106,6 +120,45 @@ function draw() {
   updateStatus();
 }
 
+// ---------- selection helpers ----------
+const selIds = () => [...app.selSet];
+const selFeats = () => selIds().map((id) => S.byId(id)).filter(Boolean);
+
+function pruneSel() {
+  for (const id of [...app.selSet]) if (!S.byId(id)) app.selSet.delete(id);
+  if (app._sel && !S.byId(app._sel)) app._sel = [...app.selSet].pop() || null;
+}
+
+function setMulti(ids, primary) {
+  const list = ids.filter((id) => S.byId(id));
+  app.selSet = new Set(list);
+  app._sel = primary && app.selSet.has(primary) ? primary : list[list.length - 1] || null;
+  if (list.length && app.tab !== 'layers') app.tab = 'props';
+  renderPanel();
+  requestRender();
+}
+
+function select(id) {
+  app.sel = id;
+  if (id && app.tab !== 'layers') app.tab = 'props';
+  renderPanel();
+  requestRender();
+}
+
+function toggleSelect(id) {
+  const ids = selIds();
+  const i = ids.indexOf(id);
+  if (i >= 0) ids.splice(i, 1); else ids.push(id);
+  setMulti(ids, i >= 0 ? null : id);
+}
+
+const groupMembers = (gid) => S.getDoc().features.filter((f) => f.groupId === gid).map((f) => f.id);
+const movable = (f) => f.points.length > 0 && !(f.type === 'label' && f.pathId) && !(f.type === 'district' && f.followWall);
+
+function moveFeature(f, dx, dy) {
+  if (movable(f)) f.points = f.points.map((p) => [p[0] + dx, p[1] + dy]);
+}
+
 // ---------- overlay ----------
 function strokeScreen(pts, closed, color, width, dash) {
   if (pts.length < 2) return;
@@ -133,15 +186,29 @@ function editablePoints(f) {
   return f.points;
 }
 
+function drawGrid() {
+  if (!SN.snap.showGrid || SN.snap.gridSize <= 0) return;
+  const doc = S.getDoc();
+  let step = SN.snap.gridSize;
+  while (step * view.s < 8) step *= 2;
+  const x0 = view.ox, y0 = view.oy, x1 = view.ox + doc.meta.width * view.s, y1 = view.oy + doc.meta.height * view.s;
+  ctx.beginPath();
+  for (let x = 0; x <= doc.meta.width; x += step) { const sx = view.ox + x * view.s; ctx.moveTo(sx, y0); ctx.lineTo(sx, y1); }
+  for (let y = 0; y <= doc.meta.height; y += step) { const sy = view.oy + y * view.s; ctx.moveTo(x0, sy); ctx.lineTo(x1, sy); }
+  ctx.strokeStyle = 'rgba(80,170,255,.22)'; ctx.lineWidth = 1; ctx.stroke();
+}
+
 function drawOverlay() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const hov = app.hover && app.hover !== app.sel ? S.byId(app.hover) : null;
+  drawGrid();
+  const hov = app.hover && !app.selSet.has(app.hover) ? S.byId(app.hover) : null;
   if (hov && app.tool === 'select' && !app.drag) strokeScreen(outlineOf(hov), closedOutline(hov), 'rgba(80,170,255,.55)', 2);
-  const f = app.sel ? S.byId(app.sel) : null;
-  if (f) {
+  const multi = app.selSet.size > 1;
+  for (const f of selFeats()) {
     const o = outlineOf(f);
     strokeScreen(o, closedOutline(f), 'rgba(0,0,0,.5)', 4);
-    strokeScreen(o, closedOutline(f), '#4db0ff', 2, [6, 4]);
+    strokeScreen(o, closedOutline(f), multi ? '#ffb547' : '#4db0ff', 2, [6, 4]);
+    if (multi) continue;
     const pts = editablePoints(f);
     if (pts) {
       if (f.smooth) strokeScreen(pts, isClosed(f), 'rgba(77,176,255,.45)', 1);
@@ -154,7 +221,7 @@ function drawOverlay() {
   }
   if (app.drawing) {
     const t = toolById(app.drawing.tool);
-    const pts = app.drawing.pts.concat(app.mouse ? [app.snap || app.mouse] : []);
+    const pts = app.drawing.pts.concat(app.mouse ? [app.snapped || app.mouse] : []);
     strokeScreen(pts, false, 'rgba(0,0,0,.6)', 4);
     strokeScreen(pts, false, '#ffb547', 2);
     if (t.draw === 'poly' && pts.length > 2) strokeScreen([pts[pts.length - 1], pts[0]], false, '#ffb547', 1.5, [5, 5]);
@@ -163,10 +230,27 @@ function drawOverlay() {
       ctx.beginPath(); ctx.arc(q[0], q[1], 3.5, 0, Math.PI * 2); ctx.fillStyle = '#ffb547'; ctx.fill();
     }
   }
+  // Alignment guides
+  const { gx, gy } = app.guides;
+  if (gx != null || gy != null) {
+    ctx.save();
+    ctx.strokeStyle = '#ff5fd2'; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    if (gx != null) { const sx = toScreen([gx, 0])[0]; ctx.moveTo(sx, 0); ctx.lineTo(sx, canvas.height / dpr); }
+    if (gy != null) { const sy = toScreen([0, gy])[1]; ctx.moveTo(0, sy); ctx.lineTo(canvas.width / dpr, sy); }
+    ctx.stroke();
+    ctx.restore();
+  }
   if (app.snap) {
     const q = toScreen(app.snap);
     ctx.beginPath(); ctx.arc(q[0], q[1], 8, 0, Math.PI * 2);
     ctx.strokeStyle = '#59e38b'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  if (app.marquee) {
+    const a = toScreen(app.marquee.a), b = toScreen(app.marquee.b);
+    ctx.fillStyle = 'rgba(77,176,255,.12)'; ctx.strokeStyle = '#4db0ff'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+    ctx.fillRect(a[0], a[1], b[0] - a[0], b[1] - a[1]); ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+    ctx.setLineDash([]);
   }
 }
 
@@ -203,6 +287,7 @@ function hitTest(w) {
 }
 
 function handleAt(sx, sy) {
+  if (app.selSet.size > 1) return -1;
   const f = app.sel && S.byId(app.sel);
   const pts = editablePoints(f);
   if (!pts) return -1;
@@ -213,31 +298,23 @@ function handleAt(sx, sy) {
   return -1;
 }
 
-function snapPoint(w, disabled, skipId) {
-  app.snap = null;
-  if (disabled) return w;
-  const tol = 10 / view.s;
-  let best = null, bd = tol;
-  for (const f of S.getDoc().features) {
-    if (f.hidden || f.id === skipId || f.type === 'label' || f.type === 'compass' || f.type === 'landmark') continue;
-    for (const p of f.points || []) { const d = G.dist(p, w); if (d < bd) { bd = d; best = p; } }
-  }
-  if (best) { app.snap = best.slice(); return best.slice(); }
-  return w;
+// ---------- snapping ----------
+function snapPoint(w, disabled, skipId, from, shift) {
+  const r = SN.snapPoint(w, {
+    feats: S.getDoc().features, tol: 9 / view.s, skip: new Set(skipId ? (Array.isArray(skipId) ? skipId : [skipId]) : []),
+    from, shift, disabled,
+  });
+  app.snap = r.marker; app.snapped = r.p; app.guides = { gx: r.gx, gy: r.gy };
+  return r.p;
 }
+const clearSnap = () => { app.snap = null; app.snapped = null; app.guides = { gx: null, gy: null }; };
 
-// ---------- selection & editing ----------
-function select(id) {
-  app.sel = id;
-  if (id && app.tab !== 'layers') app.tab = 'props';
-  renderPanel();
-  requestRender();
-}
-
+// ---------- tools & editing ----------
 function setTool(id) {
   if (app.drawing) finishDrawing();
   app.tool = id;
   if (id !== 'split') app.splitTarget = null;
+  if (id !== 'kit') app.kit = null;
   document.querySelectorAll('.tool').forEach((b) => b.classList.toggle('active', b.dataset.tool === id));
   canvas.style.cursor = id === 'select' ? 'default' : 'crosshair';
   if (!app.sel) renderPanel();
@@ -246,7 +323,7 @@ function setTool(id) {
 
 function finishDrawing() {
   const d = app.drawing;
-  app.drawing = null; app.snap = null;
+  app.drawing = null; clearSnap();
   if (!d) return;
   const t = toolById(d.tool);
   const pts = [];
@@ -333,7 +410,31 @@ function splitAreas(line, targetId) {
   toast(count === 1 ? 'Split into two; a wider street runs along the cut (delete it in Layers if unwanted). The new piece is selected.' : `Split ${count} areas.`);
 }
 
+// A street name: attaches to the road under the click and runs along its curve.
+function placeStreetName(w) {
+  const doc = S.getDoc(), tol = 40 / view.s;
+  let best = null, bd = tol;
+  for (const f of doc.features) {
+    if (f.type !== 'road' || f.hidden) continue;
+    const sh = featureShape(f, doc);
+    if (sh.length < 2) continue;
+    const r = G.nearestOnPath(w, sh, isClosed(f)), d = r.d - f.width / 2;
+    if (d < bd) { bd = d; best = { f, sh, r }; }
+  }
+  const lab = S.createFeature('label', [w], { text: 'Street Name', style: 'street', size: best ? Math.max(9, Math.min(20, best.f.width * 0.9)) : 13, spacing: 0.18 });
+  if (best) {
+    const cum = G.cumLengths(best.sh);
+    lab.pathId = best.f.id;
+    lab.pathPos = Math.max(0, Math.min(1, (cum[best.r.i] + G.dist(best.sh[best.r.i], best.r.q)) / cum[cum.length - 1]));
+  } else toast('No road under the click, so this is a free label. Click directly on a road to attach a street name to it.');
+  S.insertFeature(lab);
+  app.sel = lab.id; app.tab = 'props';
+  S.commit();
+  setTimeout(() => { const ta = document.querySelector('#panelBody textarea'); if (ta) { ta.focus(); ta.select(); } }, 0);
+}
+
 function placePoint(t, w) {
+  if (t.id === 'streetName') { placeStreetName(w); return; }
   const f = S.createFeature(t.type, [w], t.extra || {});
   if (t.type === 'label') f.text = 'New Label';
   if (t.type === 'building') f.points = shapePoints(f.shape, w, f.size, f.angle, f.aspect, f.inner) || [w];
@@ -344,29 +445,83 @@ function placePoint(t, w) {
   if (t.type === 'label') setTimeout(() => { const ta = document.querySelector('#panelBody textarea'); if (ta) { ta.focus(); ta.select(); } }, 0);
 }
 
-function deleteSelected() {
-  if (!app.sel) return;
+function placeKit(kit, params, center) {
   const doc = S.getDoc();
-  doc.features = doc.features.filter((f) => f.id !== app.sel);
+  const gid = 'g' + S.newId();
+  const ids = [];
+  let prev = null;
+  for (const f of kit.build(center, params)) {
+    f.groupId = gid; f.groupName = kit.name;
+    if (f.afterPrev && prev) { delete f.afterPrev; doc.features.splice(doc.features.indexOf(prev) + 1, 0, f); }
+    else { delete f.afterPrev; S.insertFeature(f); }
+    prev = f; ids.push(f.id);
+  }
+  setTool('select');
+  setMulti(ids);
+  S.commit();
+  toast(`${kit.name} placed: ${ids.length} items, selected together. Drag to move them as one, or re-roll the kit's seed and place again.`);
+}
+
+function deleteSelected() {
+  if (!app.selSet.size) return;
+  const doc = S.getDoc(), gone = new Set(app.selSet);
+  doc.features = doc.features.filter((f) => !gone.has(f.id));
   app.sel = null;
   S.commit();
 }
 
 function duplicateSelected() {
-  const f = app.sel && S.byId(app.sel);
-  if (!f) return;
-  const c = JSON.parse(JSON.stringify(f));
-  c.id = S.newId();
-  c.points = c.points.map((p) => [p[0] + 30, p[1] + 30]);
-  if (c.type === 'district') { c.seed = Math.floor(Math.random() * 1e9); c.locked = false; }
-  const doc = S.getDoc();
-  doc.features.splice(doc.features.indexOf(f) + 1, 0, c);
-  app.sel = c.id;
+  const fs = selFeats();
+  if (!fs.length) return;
+  const doc = S.getDoc(), groupMap = new Map(), made = [];
+  for (const f of fs) {
+    const c = JSON.parse(JSON.stringify(f));
+    c.id = S.newId();
+    c.points = c.points.map((p) => [p[0] + 30, p[1] + 30]);
+    if (c.type === 'district' || c.type === 'farm') { c.seed = Math.floor(Math.random() * 1e9); c.locked = false; }
+    if (c.groupId) { if (!groupMap.has(c.groupId)) groupMap.set(c.groupId, 'g' + S.newId()); c.groupId = groupMap.get(c.groupId); }
+    doc.features.splice(doc.features.indexOf(f) + 1, 0, c);
+    made.push(c.id);
+  }
+  setMulti(made);
+  S.commit();
+}
+
+// Align / distribute the selected features by their bounding boxes.
+function alignSel(mode) {
+  const items = selFeats().filter(movable).map((f) => ({ f, b: G.bbox(outlineOf(f)) }));
+  if (items.length < 2) return;
+  const x0 = Math.min(...items.map((i) => i.b.x0)), x1 = Math.max(...items.map((i) => i.b.x1));
+  const y0 = Math.min(...items.map((i) => i.b.y0)), y1 = Math.max(...items.map((i) => i.b.y1));
+  for (const { f, b } of items) {
+    let dx = 0, dy = 0;
+    if (mode === 'left') dx = x0 - b.x0;
+    else if (mode === 'right') dx = x1 - b.x1;
+    else if (mode === 'hcenter') dx = (x0 + x1) / 2 - (b.x0 + b.x1) / 2;
+    else if (mode === 'top') dy = y0 - b.y0;
+    else if (mode === 'bottom') dy = y1 - b.y1;
+    else if (mode === 'vcenter') dy = (y0 + y1) / 2 - (b.y0 + b.y1) / 2;
+    moveFeature(f, dx, dy);
+  }
+  S.commit();
+}
+
+function distributeSel(axis) {
+  const items = selFeats().filter(movable).map((f) => ({ f, b: G.bbox(outlineOf(f)) }));
+  if (items.length < 3) { toast('Select at least three items to distribute.'); return; }
+  const c = (i) => (axis === 'h' ? (i.b.x0 + i.b.x1) / 2 : (i.b.y0 + i.b.y1) / 2);
+  items.sort((a, b) => c(a) - c(b));
+  const first = c(items[0]), last = c(items[items.length - 1]);
+  items.forEach((it, i) => {
+    const d = first + ((last - first) * i) / (items.length - 1) - c(it);
+    moveFeature(it.f, axis === 'h' ? d : 0, axis === 'h' ? 0 : d);
+  });
   S.commit();
 }
 
 const ctxHelpers = {
   haloDefault() { return S.getDoc().settings.haloWidth ?? 0.34; },
+  detachLabel(f) { f.pathId = ''; S.commit(); },
   // Rebuild a preset-shaped building around its current centre.
   reshapeBuilding(f) {
     if (f.shape === 'free' || !f.points.length) return;
@@ -426,7 +581,6 @@ const ctxHelpers = {
     toast(`Added ${made} wall segment${made > 1 ? 's' : ''} along the free edges.`);
   },
   wallFromArea(f) {
-    const doc = S.getDoc();
     const src = f.followWall ? S.byId(f.followWall) : f;
     if (!src || src.points.length < 3) return;
     const w = S.createFeature('wall', src.points, { name: (f.name || 'District') + ' Wall', smooth: !!src.smooth });
@@ -440,6 +594,18 @@ const ctxHelpers = {
 
 // ---------- pointer input ----------
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// Features whose control points fall inside a world-space rectangle (box select).
+function featuresInRect(a, b) {
+  const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+  const doc = S.getDoc(), out = [];
+  for (const f of doc.features) {
+    if (f.hidden || f.locked) continue;
+    const pts = f.type === 'district' && f.followWall ? (S.byId(f.followWall) || {}).points || [] : f.points;
+    if (pts.some((p) => p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1)) out.push(f.id);
+  }
+  return out;
+}
 
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
@@ -458,15 +624,20 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (e.button !== 0) return;
 
-  if (tool.draw === 'point') { placePoint(tool, snapPoint(w, true)); return; }
+  if (tool.id === 'kit') {
+    if (app.kit) placeKit(app.kit.def, app.kit.params, snapPoint(w, e.altKey));
+    clearSnap();
+    return;
+  }
+  if (tool.draw === 'point') { placePoint(tool, snapPoint(w, e.altKey)); clearSnap(); return; }
   if (tool.draw) {
-    const p = snapPoint(w, e.altKey);
+    const last = app.drawing && app.drawing.pts[app.drawing.pts.length - 1];
+    const p = snapPoint(w, e.altKey, null, last, e.shiftKey);
     if (!app.drawing) {
       const sel = app.sel && S.byId(app.sel);
       const target = tool.id === 'split' ? app.splitTarget || (sel && (sel.type === 'district' || sel.type === 'farm') ? sel.id : null) : null;
       app.drawing = { tool: tool.id, pts: [p], target };
-    }
-    else {
+    } else {
       const first = app.drawing.pts[0];
       if (tool.draw === 'poly' && app.drawing.pts.length >= 3 && G.dist(toScreen(first), [sx, sy]) < 10) { finishDrawing(); return; }
       app.drawing.pts.push(p);
@@ -484,7 +655,8 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   const hits = hitTest(w);
   if (!hits.length) {
-    if (app.sel) select(null);
+    if (e.shiftKey) { app.marquee = { a: w, b: w, add: e.ctrlKey || e.metaKey }; app.drag = { mode: 'marquee' }; return; }
+    if (app.selSet.size) select(null);
     app.drag = { mode: 'pan', sx, sy, ox: view.ox, oy: view.oy, button: 0 };
     canvas.style.cursor = 'grabbing';
     return;
@@ -494,11 +666,15 @@ canvas.addEventListener('pointerdown', (e) => {
     const idx = hits.findIndex((h) => h.id === app.sel);
     if (idx >= 0) hit = hits[(idx + 1) % hits.length];
   }
-  if (hit.id !== app.sel) select(hit.id);
+  if (e.shiftKey) { toggleSelect(hit.id); return; }
+  const inMulti = app.selSet.size > 1 && app.selSet.has(hit.id);
+  if (!inMulti && hit.id !== app.sel) select(hit.id);
   const f = S.byId(hit.id);
+  const mode = inMulti ? 'move' : hit.kind === 'offset' ? 'offset' : hit.kind === 'pathpos' ? 'pathpos' : 'move';
+  const ids = mode === 'move' ? (inMulti ? selIds() : [f.id]) : [f.id];
   app.drag = {
-    mode: hit.kind === 'offset' ? 'offset' : hit.kind === 'pathpos' ? 'pathpos' : 'move',
-    id: f.id, start: w, moved: false,
+    mode, id: f.id, start: w, moved: false, ids,
+    origs: new Map(ids.map((id) => [id, JSON.parse(JSON.stringify(S.byId(id).points))])),
     orig: JSON.parse(JSON.stringify(f.points)), origOffset: (f.labelOffset || [0, 0]).slice(),
   };
 });
@@ -508,8 +684,10 @@ canvas.addEventListener('pointermove', (e) => {
   app.mouse = w;
   const d = app.drag;
   if (!d) {
-    if (app.drawing) snapPoint(w, e.altKey);
-    else app.snap = null;
+    if (app.drawing || app.tool === 'kit' || (toolById(app.tool) || {}).draw === 'point') {
+      const last = app.drawing && app.drawing.pts[app.drawing.pts.length - 1];
+      snapPoint(w, e.altKey, null, last, e.shiftKey);
+    } else clearSnap();
     if (app.tool === 'select') {
       const hits = hitTest(w);
       app.hover = hits.length ? hits[0].id : null;
@@ -523,6 +701,7 @@ canvas.addEventListener('pointermove', (e) => {
     requestRender();
     return;
   }
+  if (d.mode === 'marquee') { app.marquee.b = w; requestRender(); return; }
   if (d.mode === 'freehand') {
     if (!d.moved && Math.hypot(sx - d.sx, sy - d.sy) > 5) d.moved = true;
     if (d.moved && app.drawing) {
@@ -536,17 +715,32 @@ canvas.addEventListener('pointermove', (e) => {
   if (!f) return;
   d.moved = true;
   if (d.mode === 'vertex') {
-    f.points[d.index] = snapPoint(w, e.altKey, f.id);
+    const pts = f.points, i = d.index, from = pts.length > 1 ? pts[(i - 1 + pts.length) % pts.length] : null;
+    pts[i] = snapPoint(w, e.altKey, f.id, from, e.shiftKey);
   } else if (d.mode === 'move') {
-    if (f.type === 'district' && f.followWall) return;
-    const dx = w[0] - d.start[0], dy = w[1] - d.start[1];
-    f.points = d.orig.map((p) => [p[0] + dx, p[1] + dy]);
+    const raw = [w[0] - d.start[0], w[1] - d.start[1]];
+    const skip = new Set(d.ids);
+    const movers = [];
+    for (const id of d.ids) for (const p of d.origs.get(id) || []) movers.push(p);
+    const r = e.altKey ? { d: raw, marker: null, gx: null, gy: null } : SN.snapMove(raw, movers, S.getDoc().features, skip, 9 / view.s);
+    app.snap = r.marker; app.guides = { gx: r.gx, gy: r.gy };
+    for (const id of d.ids) {
+      const g = S.byId(id);
+      if (g && movable(g)) g.points = d.origs.get(id).map((p) => [p[0] + r.d[0], p[1] + r.d[1]]);
+    }
   } else if (d.mode === 'offset') {
     f.labelOffset = [d.origOffset[0] + w[0] - d.start[0], d.origOffset[1] + w[1] - d.start[1]];
   } else if (d.mode === 'pathpos') {
-    const sh = featureShape(f, S.getDoc());
-    const r = G.nearestOnPath(w, sh, false), cum = G.cumLengths(sh);
-    f.labelPos = Math.max(0, Math.min(1, (cum[r.i] + G.dist(sh[r.i], r.q)) / cum[cum.length - 1]));
+    // Slide a river name, or a street name attached to a road, along its path.
+    const pf = f.type === 'label' ? S.byId(f.pathId) : f;
+    if (pf) {
+      const sh = featureShape(pf, S.getDoc());
+      if (sh.length >= 2) {
+        const r = G.nearestOnPath(w, sh, false), cum = G.cumLengths(sh);
+        const v = Math.max(0, Math.min(1, (cum[r.i] + G.dist(sh[r.i], r.q)) / cum[cum.length - 1]));
+        if (f.type === 'label') f.pathPos = v; else f.labelPos = v;
+      }
+    }
   }
   S.touch();
 });
@@ -556,15 +750,23 @@ canvas.addEventListener('pointerup', () => {
   app.drag = null;
   if (!d) return;
   if (d.mode === 'pan') { canvas.style.cursor = app.tool === 'select' ? 'default' : 'crosshair'; return; }
+  if (d.mode === 'marquee') {
+    const m = app.marquee;
+    app.marquee = null;
+    const tiny = Math.hypot(m.b[0] - m.a[0], m.b[1] - m.a[1]) * view.s < 4;
+    if (!tiny) setMulti([...(m.add ? selIds() : []), ...featuresInRect(m.a, m.b)]);
+    requestRender();
+    return;
+  }
   if (d.mode === 'freehand') return;
-  app.snap = null;
-  if (d.moved) S.commit();
+  clearSnap();
+  if (d.moved) S.commit(); else requestRender();
 });
 
 canvas.addEventListener('dblclick', (e) => {
   if (app.drawing) { finishDrawing(); return; }
   if (app.tool !== 'select') return;
-  const f = app.sel && S.byId(app.sel);
+  const f = app.selSet.size === 1 && app.sel && S.byId(app.sel);
   const pts = editablePoints(f);
   if (!pts || pts.length < 2) return;
   const w = toWorld(e.offsetX, e.offsetY);
@@ -593,17 +795,19 @@ window.addEventListener('keydown', (e) => {
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) S.redo(); else S.undo(); return; }
   if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); S.redo(); return; }
   if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); return; }
+  if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); setTool('select'); setMulti(S.getDoc().features.filter((f) => !f.hidden && !f.locked).map((f) => f.id)); return; }
   if (e.key === ' ') { app.space = true; canvas.style.cursor = 'grab'; e.preventDefault(); return; }
   if (e.key === 'Escape') {
-    if (app.drawing) { app.drawing = null; app.snap = null; requestRender(); }
+    if (app.drawing) { app.drawing = null; clearSnap(); requestRender(); }
     else if (app.tool !== 'select') setTool('select');
     else select(null);
     return;
   }
   if (e.key === 'Enter' && app.drawing) { finishDrawing(); return; }
   if (e.key === 'Backspace' && app.drawing) { app.drawing.pts.pop(); if (!app.drawing.pts.length) app.drawing = null; requestRender(); return; }
-  if ((e.key === 'Delete' || e.key === 'Backspace') && app.sel) { deleteSelected(); return; }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && app.selSet.size) { deleteSelected(); return; }
   if (e.key === 'f' && e.shiftKey) { fitView(); return; }
+  if (e.key === 'g' && e.shiftKey) { toggleSnap(); return; }
   if (mod || e.altKey) return;
   const t = TOOLS.find((x) => x.key === e.key.toLowerCase());
   if (t) setTool(t.id);
@@ -616,6 +820,7 @@ function renderTools() {
   const nav = $('#tools');
   nav.innerHTML = '';
   for (const t of TOOLS) {
+    if (t.hidden) continue;
     const b = el('button', { class: 'tool' + (t.id === app.tool ? ' active' : ''), 'data-tool': t.id, title: `${t.label} (${t.key.toUpperCase()})` });
     b.innerHTML = `<svg viewBox="0 0 24 24">${ICON[t.id]}</svg>`;
     b.addEventListener('click', () => setTool(t.id));
@@ -637,10 +842,45 @@ function renderPanel() {
   body.innerHTML = '';
   if (app.tab === 'props') renderProps(body);
   else if (app.tab === 'layers') renderLayers(body);
+  else if (app.tab === 'kits') renderKits(body);
   else renderMapSettings(body);
 }
 
+const iconBtn = (title, text, fn, cls) => el('button', { title, class: cls || '', onclick: fn }, text);
+
+function renderMulti(body) {
+  const fs = selFeats();
+  const counts = {};
+  for (const f of fs) counts[S.TYPE_LABELS[f.type]] = (counts[S.TYPE_LABELS[f.type]] || 0) + 1;
+  const anyHidden = fs.some((f) => f.hidden), anyLocked = fs.some((f) => f.locked);
+  body.append(el('div', { class: 'prop-head' },
+    el('h3', {}, `${fs.length} items selected`),
+    el('div', { class: 'btns' },
+      iconBtn('Duplicate (Ctrl+D)', '⧉', duplicateSelected),
+      iconBtn(anyHidden ? 'Show all' : 'Hide all', anyHidden ? '◌' : '◉', () => { for (const f of fs) f.hidden = !anyHidden; S.commit(); }),
+      iconBtn(anyLocked ? 'Unlock all' : 'Lock all', anyLocked ? '🔒' : '🔓', () => { for (const f of fs) f.locked = !anyLocked; S.commit(); }),
+      iconBtn('Delete (Del)', '🗑', deleteSelected, 'danger'))));
+  body.append(el('p', { class: 'info' }, Object.entries(counts).map(([k, v]) => `${v} × ${k}`).join(' · ')));
+  body.append(el('p', { class: 'info' }, 'Drag any selected item to move them all together. Shift-click adds or removes items; Shift-drag on empty map box-selects.'));
+
+  body.append(el('div', { class: 'heading' }, 'Group'));
+  const grouped = fs.some((f) => f.groupId);
+  body.append(el('div', { class: 'btnrow' },
+    el('button', { title: 'Group these so one click on “Select group” grabs them all', onclick: () => { const gid = 'g' + S.newId(); for (const f of fs) { f.groupId = gid; delete f.groupName; } S.commit(); } }, 'Group'),
+    grouped ? el('button', { onclick: () => { for (const f of fs) { delete f.groupId; delete f.groupName; } S.commit(); } }, 'Ungroup') : null));
+
+  body.append(el('div', { class: 'heading' }, 'Align'));
+  const row = (items) => el('div', { class: 'btnrow wrap' }, ...items.map(([t, label, fn]) => el('button', { title: t, onclick: fn }, label)));
+  body.append(row([
+    ['Align left edges', '⇤ Left', () => alignSel('left')], ['Center horizontally', '↔ Center', () => alignSel('hcenter')], ['Align right edges', 'Right ⇥', () => alignSel('right')],
+    ['Align top edges', '⤒ Top', () => alignSel('top')], ['Center vertically', '↕ Middle', () => alignSel('vcenter')], ['Align bottom edges', 'Bottom ⤓', () => alignSel('bottom')],
+  ]));
+  body.append(el('div', { class: 'heading' }, 'Distribute'));
+  body.append(row([['Space evenly left to right', '↔ Horizontally', () => distributeSel('h')], ['Space evenly top to bottom', '↕ Vertically', () => distributeSel('v')]]));
+}
+
 function renderProps(body) {
+  if (app.selSet.size > 1) { renderMulti(body); return; }
   const f = app.sel && S.byId(app.sel);
   if (!f) {
     const t = toolById(app.tool);
@@ -650,8 +890,9 @@ function renderProps(body) {
       el('div', { class: 'heading' }, 'Getting around'),
       el('ul', { class: 'tips' },
         el('li', {}, 'Scroll to zoom, drag empty space (or hold Space / right-drag) to pan.'),
-        el('li', {}, 'Click anything on the map to edit it here; locked layers are selectable from the Layers tab.'),
-        el('li', {}, 'Districts generate their own streets — try the presets and the 🎲 Reroll button.'),
+        el('li', {}, 'Click anything on the map to edit it here; Shift-click or Shift-drag to select several.'),
+        el('li', {}, 'The Kits tab places ready-made groups: a city center, market square, cemetery, park or keep.'),
+        el('li', {}, 'Snapping and alignment guides are in the toolbar; hold Alt to bypass them for one action.'),
         el('li', {}, 'Everything autosaves in this browser. Use Save to keep a .json file.')),
     );
     return;
@@ -665,6 +906,13 @@ function renderProps(body) {
       el('button', { class: 'danger', title: 'Delete (Del)', onclick: deleteSelected }, '🗑')),
   );
   body.append(head);
+  if (f.groupId) {
+    const n = groupMembers(f.groupId).length;
+    body.append(el('div', { class: 'groupbar' },
+      el('span', {}, `In group “${f.groupName || 'Group'}” (${n} items)`),
+      el('button', { title: 'Select every item in this group', onclick: () => setMulti(groupMembers(f.groupId), f.id) }, 'Select group'),
+      el('button', { title: 'Remove this item from the group', onclick: () => { delete f.groupId; delete f.groupName; S.commit(); } }, 'Leave')));
+  }
   if (f.type === 'district' && f.followWall) body.append(el('p', { class: 'info' }, 'This district follows a wall’s shape. Edit the wall to reshape it, set “Shape follows” to its own outline, or split it into smaller districts with ✂.'));
   buildForm(body, SCHEMAS[f.type], f, {
     onInput: () => S.touch(),
@@ -677,9 +925,24 @@ function renderProps(body) {
 
 const TYPE_ICON = { wall: 'wall', district: 'district', cutout: 'cutout', farm: 'farm', water: 'water', river: 'river', road: 'road', plaza: 'plaza', building: 'building', landmark: 'landmark', label: 'label', compass: 'compass' };
 
+function renderKits(body) {
+  body.append(el('p', { class: 'info' }, 'Kits generate a whole group of features at once. Pick a kit, set its size and seed, press Place, then click the map. The pieces arrive selected together, so you can drag them into position as one, then restyle any piece afterwards.'));
+  for (const kit of KITS) {
+    const st = app.kitState[kit.id];
+    const card = el('div', { class: 'kit' }, el('h4', {}, kit.name), el('p', { class: 'info' }, kit.desc));
+    buildForm(card, kit.params.map((p) => ({ k: p.k, label: p.label, t: p.t, min: p.min, max: p.max, step: p.step })), st,
+      { onInput() {}, onCommit() {}, rebuild: () => {} });
+    card.append(el('button', {
+      class: 'primary wide',
+      onclick: () => { app.kit = { def: kit, params: { ...st } }; setTool('kit'); toast(`Click on the map to place the ${kit.name.toLowerCase()}.`); },
+    }, `Place ${kit.name.toLowerCase()}…`));
+    body.append(card);
+  }
+}
+
 function renderLayers(body) {
   const doc = S.getDoc();
-  body.append(el('p', { class: 'info' }, 'Top of the list draws on top. Drag rows (or use ▲▼) to reorder — e.g. put a lake above a river. Roads, rivers, lakes, walls and buildings placed above a district cut through its blocks. Area and river names always stay on top.'));
+  body.append(el('p', { class: 'info' }, 'Top of the list draws on top. Drag rows (or use ▲▼) to reorder — e.g. put a lake above a river. Roads, rivers, lakes, walls and buildings placed above a district cut through its blocks. Shift-click rows to select several. Area and river names always stay on top.'));
   const list = el('div', { class: 'layers' });
   const order = [...doc.features].reverse();
   for (const f of order) {
@@ -692,7 +955,7 @@ function renderLayers(body) {
     };
     const icon = el('span', { class: 'licon', title: S.TYPE_LABELS[f.type] });
     icon.innerHTML = `<svg viewBox="0 0 24 24">${ICON[TYPE_ICON[f.type]] || ''}</svg>`;
-    const row = el('div', { class: 'layer' + (f.id === app.sel ? ' sel' : '') + (f.hidden ? ' hidden' : '') },
+    const row = el('div', { class: 'layer' + (app.selSet.has(f.id) ? ' sel' : '') + (f.hidden ? ' hidden' : '') + (f.groupId ? ' grouped' : ''), title: f.groupId ? `Group: ${f.groupName || 'Group'}` : '' },
       el('span', { class: 'grip', title: 'Drag to reorder' }, '⠿'), icon,
       el('span', { class: 'lname', title: name }, name),
       el('button', { title: 'Move up (draw above)', onclick: (e) => { e.stopPropagation(); move(1); } }, '▲'),
@@ -700,7 +963,10 @@ function renderLayers(body) {
       el('button', { title: f.hidden ? 'Show' : 'Hide', onclick: (e) => { e.stopPropagation(); f.hidden = !f.hidden; S.commit(); } }, f.hidden ? '◌' : '◉'),
       el('button', { title: f.locked ? 'Unlock' : 'Lock', onclick: (e) => { e.stopPropagation(); f.locked = !f.locked; S.commit(); } }, f.locked ? '🔒' : '🔓'));
     row.dataset.id = f.id;
-    row.addEventListener('click', () => { if (row.dataset.dragged) return; app.sel = f.id; renderPanel(); requestRender(); });
+    row.addEventListener('click', (e) => {
+      if (row.dataset.dragged) return;
+      if (e.shiftKey) toggleSelect(f.id); else { app.sel = f.id; renderPanel(); requestRender(); }
+    });
     row.addEventListener('pointerdown', (e) => {
       if (e.button !== 0 || e.target.closest('button')) return;
       const startY = e.clientY;
@@ -861,10 +1127,56 @@ function toast(msg) {
   const t = $('#toast');
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 4200);
 }
 
 function toggleHelp(show) { $('#help').classList.toggle('hidden', !show); }
+
+// ---------- snap menu ----------
+function syncSnapButton() {
+  $('#btnSnap').classList.toggle('on', SN.snap.enabled);
+  $('#btnSnap').setAttribute('aria-pressed', String(SN.snap.enabled));
+}
+function toggleSnap() {
+  SN.snap.enabled = !SN.snap.enabled;
+  SN.saveSnap(); syncSnapButton(); clearSnap(); requestRender();
+  toast(SN.snap.enabled ? 'Snapping on' : 'Snapping off');
+}
+function openSnapMenu() {
+  const menu = $('#snapMenu');
+  if (!menu.classList.contains('hidden')) { menu.classList.add('hidden'); return; }
+  menu.innerHTML = '';
+  const row = (k, text) => {
+    const cb = el('input', { type: 'checkbox', checked: !!SN.snap[k] });
+    cb.addEventListener('change', () => { SN.snap[k] = cb.checked; SN.saveSnap(); requestRender(); });
+    return el('label', { class: 'mrow' }, cb, ' ' + text);
+  };
+  const gs = el('input', { type: 'number', min: 2, max: 500, step: 1, value: SN.snap.gridSize });
+  gs.addEventListener('input', () => { const v = parseFloat(gs.value); if (v > 0) { SN.snap.gridSize = v; SN.saveSnap(); requestRender(); } });
+  menu.append(
+    el('div', { class: 'mhead' }, 'Snapping'),
+    row('enabled', 'Snapping on (Shift+G)'),
+    row('points', 'Snap to corner points'),
+    row('edges', 'Snap onto edges'),
+    row('guides', 'Alignment guides (line up with other points)'),
+    row('angle', 'Shift while drawing: lock to 15° steps'),
+    el('div', { class: 'mhead' }, 'Grid'),
+    row('grid', 'Snap to grid'),
+    row('showGrid', 'Show grid'),
+    el('label', { class: 'mrow' }, 'Grid size ', gs),
+    el('div', { class: 'mnote' }, 'Hold Alt to bypass snapping for a single action.'),
+  );
+  const b = $('#btnSnap').getBoundingClientRect();
+  menu.style.left = Math.min(b.left, window.innerWidth - 300) + 'px';
+  menu.style.top = b.bottom + 6 + 'px';
+  menu.classList.remove('hidden');
+}
+$('#btnSnap').addEventListener('click', toggleSnap);
+$('#btnSnapMenu').addEventListener('click', (e) => { e.stopPropagation(); openSnapMenu(); });
+document.addEventListener('pointerdown', (e) => {
+  const m = $('#snapMenu');
+  if (!m.classList.contains('hidden') && !m.contains(e.target) && e.target.id !== 'btnSnapMenu') m.classList.add('hidden');
+});
 
 // ---------- top bar ----------
 // Swap in a whole new map as one undoable step (Ctrl+Z brings the old one back).
@@ -904,12 +1216,14 @@ function updateStatus() {
 // ---------- boot ----------
 S.onChange((kind, source) => {
   if (kind === 'doc') {
-    if (app.sel && !S.byId(app.sel)) app.sel = null;
+    pruneSel();
     if (!(source === 'panel' && app.tab !== 'layers')) renderPanel();
   }
   requestRender();
 });
 
+SN.loadSnap();
+syncSnapButton();
 new ResizeObserver(resize).observe($('#stage'));
 renderTools();
 const saved = S.loadSaved();
