@@ -1061,8 +1061,11 @@ export function renderMap(ctx, doc, o) {
         ctx.strokeStyle = C.outline; ctx.lineWidth = Math.max(1, f.size * 0.25); ctx.stroke();
         if (f.showLabel && f.name) {
           const p = G.add(c, f.labelOffset || [0, 0]);
+          const st = LABEL_STYLES[f.labelStyle] || LABEL_STYLES.place;
           const poly = drawText(ctx, f.name, p[0], p[1], {
-            size: f.labelSize, curve: f.labelCurve, spacing: 0.06, family: fam('fontLabel'), upper: true, fill: C.label, halo: C.labelHalo, haloW: f.labelSize * haloOf(f),
+            size: f.labelSize, angle: f.labelAngle, curve: f.labelCurve, spacing: f.labelSpacing == null ? 0.06 : f.labelSpacing,
+            family: fam(st.font), upper: st.upper, italic: st.italic,
+            fill: f.labelColor || C[st.fill], halo: f.haloColor || (st.halo ? C[st.halo] : null), haloW: f.labelSize * haloOf(f),
           });
           if (poly) hits.push({ id: f.id, kind: 'offset', poly });
         }
@@ -1076,14 +1079,14 @@ export function renderMap(ctx, doc, o) {
         if (f.pathId && shape.has(f.pathId) && shape.get(f.pathId).length >= 2) {
           const pp = drawTextOnPath(ctx, shape.get(f.pathId), f.text, {
             pos: f.pathPos == null ? 0.5 : f.pathPos, size: f.size, spacing: f.spacing, family: fam(st.font),
-            fill: f.color || C[st.fill], halo: st.halo ? C[st.halo] : null, haloW: f.size * haloOf(f),
+            fill: f.color || C[st.fill], halo: f.haloColor || (st.halo ? C[st.halo] : null), haloW: f.size * haloOf(f),
           });
           if (pp) hits.push({ id: f.id, kind: 'pathpos', poly: pp });
           break;
         }
         const poly = drawText(ctx, f.text, c[0], c[1], {
           size: f.size, angle: f.angle, curve: f.curve, spacing: f.spacing, family: fam(st.font), upper: st.upper, italic: st.italic,
-          fill: f.color || C[st.fill], halo: st.halo ? C[st.halo] : null, haloW: f.size * haloOf(f),
+          fill: f.color || C[st.fill], halo: f.haloColor || (st.halo ? C[st.halo] : null), haloW: f.size * haloOf(f),
           boxed: st.boxed, boxFill: C.paper, boxStroke: C.frame,
         });
         if (poly) hits.push({ id: f.id, kind: 'move', poly });

@@ -41,8 +41,8 @@ export const DEFAULTS = {
     name: '', style: 'solid', tone: 'normal', hatch: true, color: '', gap: null, border: true, blend: false, fingers: 4, smooth: false,
     shape: 'free', size: 24, aspect: 1.5, inner: 0.45, angle: 0,
   },
-  landmark: { name: 'Landmark', size: 6, showLabel: true, labelSize: 20, labelCurve: 0, labelOffset: [0, -28], halo: null },
-  label: { text: 'Label', style: 'district', size: 40, angle: 0, curve: 0, spacing: 0.12, color: '', halo: null, pathId: '', pathPos: 0.5 },
+  landmark: { name: 'Landmark', size: 6, showLabel: true, labelSize: 20, labelCurve: 0, labelAngle: 0, labelSpacing: 0.06, labelStyle: 'place', labelColor: '', haloColor: '', labelOffset: [0, -28], halo: null },
+  label: { text: 'Label', style: 'district', size: 40, angle: 0, curve: 0, spacing: 0.12, color: '', haloColor: '', halo: null, pathId: '', pathPos: 0.5 },
   compass: { size: 120, angle: 0 },
 };
 
