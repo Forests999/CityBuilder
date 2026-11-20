@@ -466,21 +466,12 @@ function splitAreas(line, targetId) {
     if (f.name === 'City fill') f.name = 'District';
     doc.features.splice(doc.features.indexOf(f) + 1, 0, c);
     made = c.id; count++;
-    // A street along the cut, wider than the district's own streets, so the new boundary reads as a main road.
-    if (f.type === 'district' && cut.length >= 2) {
-      const w = Math.max(8, (+f.borderStreet || 0) * 2.2);
-      const pts = cut.map((p) => p.slice());
-      const trim = (a, b) => { const d = G.dist(a, b), t = Math.min(0.4, (w * 0.3) / (d || 1)); return G.lerp(a, b, t); };
-      pts[0] = trim(pts[0], pts[1]);
-      pts[pts.length - 1] = trim(pts[pts.length - 1], pts[pts.length - 2]);
-      S.insertFeature(S.createFeature('road', pts, { kind: 'street', width: w, ruralOutside: false, gates: false, smooth: false }));
-    }
   }
   if (!count) { toast('The line must cross all the way through a district (or farmland) to split it.'); requestRender(); return; }
   app.sel = made;
   setTool('select');
   S.commit();
-  toast(count === 1 ? 'Split into two; a wider street runs along the cut (delete it in Layers if unwanted). The new piece is selected.' : `Split ${count} areas.`);
+  toast(count === 1 ? 'Split into two. The new piece is selected.' : `Split ${count} areas.`);
 }
 
 // A street name: attaches to the road under the click and runs along its curve.

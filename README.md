@@ -95,7 +95,6 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 - **Plaza centerpiece → Market stalls:** small squares and rectangles laid out across the plaza.
 - **Label borders** can be set per label (or left on the map default); river names have their own opacity.
 - **Compass** is a classic faceted rose and can be rotated in its properties.
-- Splitting a district also adds a wider street along the cut (delete it in Layers if unwanted).
 
 ## Kits, selection and snapping
 
