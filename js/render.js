@@ -1082,7 +1082,7 @@ export function renderMap(ctx, doc, o) {
           break;
         }
         const poly = drawText(ctx, f.text, c[0], c[1], {
-          size: f.size, angle: f.angle, spacing: f.spacing, family: fam(st.font), upper: st.upper, italic: st.italic,
+          size: f.size, angle: f.angle, curve: f.curve, spacing: f.spacing, family: fam(st.font), upper: st.upper, italic: st.italic,
           fill: f.color || C[st.fill], halo: st.halo ? C[st.halo] : null, haloW: f.size * haloOf(f),
           boxed: st.boxed, boxFill: C.paper, boxStroke: C.frame,
         });

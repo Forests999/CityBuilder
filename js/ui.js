@@ -197,6 +197,7 @@ export const SCHEMAS = {
     { t: 'button', label: '⛓ Detach from road', help: 'Make this an ordinary free label again.', show: (f) => !!f.pathId, action: (f, ctx) => ctx.detachLabel(f) },
     { k: 'size', label: 'Size', t: 'range', min: 6, max: 240, step: 1 },
     { k: 'angle', label: 'Angle', t: 'range', min: -180, max: 180, step: 1 },
+    { k: 'curve', label: 'Curve (arch ↔ bowl)', t: 'range', min: -1, max: 1, step: 0.05, show: (f) => !f.pathId },
     { k: 'spacing', label: 'Letter spacing', t: 'range', min: 0, max: 2, step: 0.02 },
     { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { k: 'color', label: 'Custom color', t: 'color' },
