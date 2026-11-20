@@ -7,7 +7,7 @@
 // stream, so two districts with the same seed and settings produce identical
 // streets wherever they meet. Splitting a district therefore leaves no seam.
 
-import { polyArea, centroid, bbox, pointInPoly, splitConvex, extentAlong, fromAngle, perp, norm, sub, dist, lerp, rotate, densify, inflatePoly, projSeg } from './geom.js';
+import { polyArea, centroid, bbox, pointInPoly, splitConvex, extentAlong, fromAngle, perp, norm, sub, dist, lerp, rotate, densify, inflatePoly, projSeg, nearestOnPath } from './geom.js';
 import { mulberry32, makeNoise } from './rng.js';
 
 export const PRESETS = {
@@ -75,6 +75,7 @@ export function districtGen(f, shape, center, guides) {
   const key = ['d', f.pattern, f.blockSize, f.streetWidth, f.irregularity, f.warp, f.gridAngle, f.lots, f.courtyards, f.seed, look,
     look === 'garden' ? f.treeSpacing + ',' + f.treeDensity : look === 'cemetery' ? f.graveSpacing : '',
     grad ? [grad.mode, grad.strength, Math.round(grad.c[0]), Math.round(grad.c[1]), Math.round(grad.r)].join(',') : '',
+    f.blockVariety == null ? 0.6 : f.blockVariety,
     guides && guides.list.length ? guides.key : '',
     f.pattern === 'radial' ? center.map(Math.round).join(',') : '', shapeKey(shape)].join('|');
   return remember(key, () => {
@@ -83,6 +84,7 @@ export function districtGen(f, shape, center, guides) {
       irregularity: +f.irregularity || 0, warp: +f.warp || 0, gridAngle: +f.gridAngle || 0,
       lots: !!f.lots, courtyards: +f.courtyards || 0, seed: (f.seed >>> 0) || 1, center,
       leaves: look !== 'blocks', guides: guides && guides.list.length ? guides.list : null, grad,
+      variety: look === 'blocks' ? Math.max(0, Math.min(1, f.blockVariety == null ? 0.6 : +f.blockVariety)) : 0,
     });
     g.decor = look !== 'blocks' ? lookDecor(f, shape, g, look) : null;
     return g;
@@ -188,7 +190,7 @@ function subdivide(shape, o) {
   const noise = makeNoise((o.seed ^ 0x5bd1e995) >>> 0);
   const sb = bbox(shape), bs = o.blockSize;
   const target = bs * bs, irr = o.irregularity, ga = (o.gridAngle * Math.PI) / 180;
-  const chords = [], lotChords = [], opens = [], leaves = [];
+  const chords = [], lotChords = [], opens = [], leaves = [], nicks = [];
   const MAX = 30000;
   let count = 0;
   const stack = [[ROOT, 0, false, o.seed >>> 0]];
@@ -261,10 +263,66 @@ function subdivide(shape, o) {
     lotSplit(r[0], d + 1, h32(hash, 11)); lotSplit(r[1], d + 1, h32(hash, 12));
   }
 
+  // Small cut-outs that break up the plain polygon look of a block: chamfered or rounded corners,
+  // notches in an edge, and shallow curved bites. They are measured from the cell edge, which is a
+  // street's centre line, so each starts with the street's half width and then bites into the block.
+  function addNicks(poly, hash) {
+    const rnd = mulberry32(h32(hash, 31));
+    if (rnd() > o.variety || Math.abs(polyArea(poly)) < (bs * 0.55) ** 2) return;
+    const m = poly.length, c = centroid(poly), hw = o.streetWidth / 2;
+    const count = rnd() < 0.3 ? 2 : 1, usedCorner = new Set();
+    for (let k = 0; k < count; k++) {
+      const type = rnd();
+      if (type < 0.5) {
+        // Corner: chamfer (diagonal) or fillet (round).
+        const vi = Math.floor(rnd() * m);
+        if (usedCorner.has(vi)) continue;
+        usedCorner.add(vi);
+        const v = poly[vi], a = poly[(vi + m - 1) % m], b = poly[(vi + 1) % m];
+        const la = dist(v, a), lb = dist(v, b);
+        if (la < bs * 0.4 || lb < bs * 0.4) continue;
+        const t = hw + bs * (0.07 + rnd() * 0.16);
+        const p1 = lerp(v, a, Math.min(0.45, t / la)), p2 = lerp(v, b, Math.min(0.45, t / lb));
+        if (rnd() < 0.5) nicks.push([v, p1, p2]);
+        else {
+          const ctrl = lerp(v, lerp(p1, p2, 0.5), 0.4), pts = [v, p1];
+          for (let s = 1; s < 5; s++) {
+            const u = s / 5, w0 = (1 - u) * (1 - u), w1 = 2 * (1 - u) * u, w2 = u * u;
+            pts.push([w0 * p1[0] + w1 * ctrl[0] + w2 * p2[0], w0 * p1[1] + w1 * ctrl[1] + w2 * p2[1]]);
+          }
+          pts.push(p2);
+          nicks.push(pts);
+        }
+      } else {
+        // Edge: a notch (square-ish bite) or a shallow curved bite.
+        const ei = Math.floor(rnd() * m), e0 = poly[ei], e1 = poly[(ei + 1) % m], L = dist(e0, e1);
+        if (L < bs * 0.6) continue;
+        const d = norm(sub(e1, e0));
+        let n = perp(d);
+        if (n[0] * (c[0] - e0[0]) + n[1] * (c[1] - e0[1]) < 0) n = [-n[0], -n[1]];
+        const at = L * (0.3 + rnd() * 0.4), p = [e0[0] + d[0] * at, e0[1] + d[1] * at];
+        const dn = hw + bs * (0.08 + rnd() * 0.16);
+        if (type < 0.78) {
+          const wn = L * (0.14 + rnd() * 0.16), slant = (rnd() - 0.5) * 0.4 * wn;
+          const A = [p[0] - d[0] * wn / 2, p[1] - d[1] * wn / 2], B = [p[0] + d[0] * wn / 2, p[1] + d[1] * wn / 2];
+          nicks.push([A, B, [B[0] + n[0] * dn - d[0] * slant, B[1] + n[1] * dn - d[1] * slant], [A[0] + n[0] * dn + d[0] * slant, A[1] + n[1] * dn + d[1] * slant]]);
+        } else {
+          const cw = L * (0.18 + rnd() * 0.2), pts = [];
+          for (let s = -4; s <= 4; s++) {
+            const u = s / 4;
+            pts.push([p[0] + d[0] * cw * u + n[0] * dn * (1 - u * u), p[1] + d[1] * cw * u + n[1] * dn * (1 - u * u)]);
+          }
+          nicks.push(pts);
+        }
+      }
+    }
+  }
+
   function leaf(poly, hash) {
     if (o.leaves) leaves.push(poly);
     if (o.lots) lotSplit(poly, 0, h32(hash, 7));
-    else if (o.courtyards > 0 && mulberry32(h32(hash, 9))() < o.courtyards * 0.4) opens.push(poly);
+    else if (o.courtyards > 0 && mulberry32(h32(hash, 9))() < o.courtyards * 0.4) { opens.push(poly); return; }
+    if (o.variety > 0) addNicks(poly, hash);
   }
 
   while (stack.length) {
@@ -316,6 +374,7 @@ function subdivide(shape, o) {
     lots: lotChords.map(([a, b]) => line(a, b)),
     opens: opens.map((p) => densify(p, true, 7).map(W)),
     leaves: leaves.map((p) => densify(p, true, 9).map(W)),
+    nicks: nicks.map((p) => p.map(W)),
   };
 }
 
@@ -330,4 +389,65 @@ function clipSegToBox(a, b, x0, y0, x1, y1) {
     if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; } else { if (r < t0) return null; if (r < t1) t1 = r; }
   }
   return [lerp(a, b, t0), lerp(a, b, t1)];
+}
+
+// ---------- city edges ----------
+// Points along the district's outline where no other district lies alongside (a "free" edge).
+export function freeEdgePoints(shape, others, step = 5) {
+  const out = [], n = shape.length, boxes = others.map((s) => bbox(s));
+  for (let i = 0; i < n; i++) {
+    const a = shape[i], b = shape[(i + 1) % n], k = Math.max(1, Math.ceil(dist(a, b) / step));
+    for (let j = 0; j < k; j++) {
+      const p = lerp(a, b, (j + 0.5) / k);
+      let adjacent = false;
+      for (let t = 0; t < others.length && !adjacent; t++) {
+        const bb = boxes[t];
+        if (p[0] < bb.x0 - 3 || p[0] > bb.x1 + 3 || p[1] < bb.y0 - 3 || p[1] > bb.y1 + 3) continue;
+        if (pointInPoly(p, others[t]) || nearestOnPath(p, others[t], true).d < 3) adjacent = true;
+      }
+      if (!adjacent) out.push(p);
+    }
+  }
+  return out;
+}
+
+// Streets stop short of a free edge, each by its own amount, so the city ends in solid frontage with
+// staggered dead-ends instead of roads running out to nothing. Results are cached on the generated layout.
+export function trimStreets(g, F, bs, fade) {
+  const dmax = bs * 1.3 * fade;
+  let key = fade + '|' + bs + '|' + F.length;
+  for (let i = 0; i < F.length; i += 3) key += '|' + Math.round(F[i][0]) + ',' + Math.round(F[i][1]);
+  if (g.trim && g.trim.key === key) return g.trim.buckets;
+  const cell = Math.max(4, dmax), grid = new Map();
+  for (const q of F) {
+    const k = Math.floor(q[0] / cell) + ',' + Math.floor(q[1] / cell);
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(q);
+  }
+  const near = (p, r) => {
+    const cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell), r2 = r * r;
+    for (let x = cx - 1; x <= cx + 1; x++) {
+      for (let y = cy - 1; y <= cy + 1; y++) {
+        const list = grid.get(x + ',' + y);
+        if (!list) continue;
+        for (const q of list) if ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 < r2) return true;
+      }
+    }
+    return false;
+  };
+  const buckets = g.buckets.map(([w, lines]) => {
+    const kept = [];
+    for (const l of lines) {
+      const dc = dmax * (0.35 + 0.65 * mulberry32(h32(Math.round(l[0][0] * 3), Math.round(l[0][1] * 3)))());
+      let cur = [];
+      for (const p of l) {
+        if (!near(p, dc)) cur.push(p);
+        else { if (cur.length > 1) kept.push(cur); cur = []; }
+      }
+      if (cur.length > 1) kept.push(cur);
+    }
+    return [w, kept];
+  });
+  g.trim = { key, buckets };
+  return buckets;
 }

@@ -6,7 +6,7 @@
 // block outlines then wrap neatly around every street, plaza and riverbank.
 
 import * as G from './geom.js';
-import { districtGen, farmGen, fieldsGen, prepGuides } from './generate.js';
+import { districtGen, farmGen, fieldsGen, prepGuides, freeEdgePoints, trimStreets } from './generate.js';
 import { THEMES, FONT_WEIGHTS } from './themes.js';
 import { makeNoise, hashStr, mulberry32 } from './rng.js';
 
@@ -702,6 +702,16 @@ export function renderMap(ctx, doc, o) {
     for (const x of items) x.cs = G.inflatePoly(x.sh, 0.9);
     if (!items.length) return;
     for (const x of items) x.g = districtGen(x.d, x.sh, center, x.d.alignRoads ? getGuides() : null);
+    // Where a district has no neighbour, generated streets stop short of the edge so the city ends cleanly.
+    for (const x of items) {
+      x.buckets = x.g.buckets;
+      const fade = +x.d.edgeFade || 0;
+      if (fade > 0 && (x.d.look || 'blocks') === 'blocks') {
+        const others = feats.filter((o) => o.type === 'district' && o.id !== x.d.id && shape.get(o.id).length >= 3).map((o) => shape.get(o.id));
+        const F = freeEdgePoints(x.sh, others);
+        if (F.length) x.buckets = trimStreets(x.g, F, +x.d.blockSize || 38, fade);
+      }
+    }
     const within = (g, x, fn) => { g.save(); if (x.clip) x.clip(g); fn(); g.restore(); };
     if (S.glow && C.glow) {
       for (const x of items) within(ctx, x, () => {
@@ -759,7 +769,7 @@ export function renderMap(ctx, doc, o) {
           }
           g.globalCompositeOperation = 'destination-out';
           g.strokeStyle = '#000'; g.fillStyle = '#000';
-          for (const [w, lines] of x.g.buckets) {
+          for (const [w, lines] of x.buckets) {
             g.beginPath();
             for (const l of lines) addPath(g, l, false);
             g.lineWidth = w + 2 * ex; g.stroke();
@@ -767,6 +777,13 @@ export function renderMap(ctx, doc, o) {
           if (x.g.opens.length) {
             g.beginPath();
             for (const p of x.g.opens) addPath(g, p, true);
+            g.fill();
+            if (ex) { g.lineWidth = 2 * ex; g.stroke(); }
+          }
+          // Block corners, notches and curved bites (so blocks aren't all plain polygons).
+          if (x.g.nicks && x.g.nicks.length) {
+            g.beginPath();
+            for (const p of x.g.nicks) addPath(g, p, true);
             g.fill();
             if (ex) { g.lineWidth = 2 * ex; g.stroke(); }
           }
