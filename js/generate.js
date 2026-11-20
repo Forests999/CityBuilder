@@ -11,12 +11,12 @@ import { polyArea, centroid, bbox, pointInPoly, splitConvex, extentAlong, fromAn
 import { mulberry32, makeNoise } from './rng.js';
 
 export const PRESETS = {
-  standard:   { pattern: 'organic', blockSize: 38, streetWidth: 4,   irregularity: 0.45, warp: 10, lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
-  dense:      { pattern: 'organic', blockSize: 20, streetWidth: 2.6, irregularity: 0.6,  warp: 7,  lots: false, courtyards: 0,    tone: 'dark',   hatch: true, look: 'blocks' },
+  standard:   { pattern: 'flow',    blockSize: 38, streetWidth: 4,   irregularity: 0.45, warp: 10, lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
+  dense:      { pattern: 'flow',    blockSize: 20, streetWidth: 2.6, irregularity: 0.6,  warp: 7,  lots: false, courtyards: 0,    tone: 'dark',   hatch: true, look: 'blocks' },
   noble:      { pattern: 'radial',  blockSize: 70, streetWidth: 5.5, irregularity: 0.3,  warp: 5,  lots: false, courtyards: 0.25, tone: 'light',  hatch: true, look: 'blocks' },
   radial:     { pattern: 'radial',  blockSize: 40, streetWidth: 4,   irregularity: 0.45, warp: 6,  lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
   grid:       { pattern: 'grid',    blockSize: 45, streetWidth: 4,   irregularity: 0.15, warp: 2,  lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
-  townhouses: { pattern: 'organic', blockSize: 60, streetWidth: 4.5, irregularity: 0.5,  warp: 3,  lots: true,  courtyards: 0.12, tone: 'normal', hatch: false, look: 'blocks' },
+  townhouses: { pattern: 'flow',    blockSize: 60, streetWidth: 4.5, irregularity: 0.5,  warp: 3,  lots: true,  courtyards: 0.12, tone: 'normal', hatch: false, look: 'blocks' },
   industrial: { pattern: 'grid',    blockSize: 85, streetWidth: 5,   irregularity: 0.25, warp: 1,  lots: true,  courtyards: 0.05, tone: 'dark',   hatch: true, look: 'blocks' },
   market:     { pattern: 'grid',    blockSize: 26, streetWidth: 2.4, irregularity: 0.2,  warp: 1.5, lots: true,  courtyards: 0.2,  tone: 'light',  hatch: false, look: 'blocks' },
   cemetery:   { pattern: 'grid',    blockSize: 80, streetWidth: 2.2, irregularity: 0.1,  warp: 2,  lots: false, courtyards: 0,    tone: 'park',   hatch: false, look: 'cemetery', graveSpacing: 8 },
@@ -80,21 +80,29 @@ function gradientOf(f, shape) {
 export function districtGen(f, shape, center, guides) {
   const look = f.look || 'blocks';
   const grad = gradientOf(f, shape);
-  const key = ['d', f.pattern, f.blockSize, f.streetWidth, f.irregularity, f.warp, f.gridAngle, f.lots, f.courtyards, f.seed, look,
+  // Flowing and ring patterns trace streets along a direction field; they only apply to building districts.
+  let pattern = f.pattern;
+  if (look !== 'blocks' && (pattern === 'flow' || pattern === 'rings')) pattern = 'organic';
+  const useFlow = pattern === 'flow' || pattern === 'rings';
+  const focus = Array.isArray(f.flowCenter) && f.flowCenter.length === 2 ? f.flowCenter : (Array.isArray(f.gradCenter) && f.gradCenter.length === 2 ? f.gradCenter : null);
+  const key = ['d', pattern, f.blockSize, f.streetWidth, f.irregularity, f.warp, f.gridAngle, f.lots, f.courtyards, f.seed, look,
     look === 'garden' ? f.treeSpacing + ',' + f.treeDensity : look === 'cemetery' ? f.graveSpacing : '',
     grad ? [grad.mode, grad.strength, Math.round(grad.c[0]), Math.round(grad.c[1]), Math.round(grad.r)].join(',') : '',
     f.blockVariety == null ? 0.6 : f.blockVariety, f.coherence == null ? 0.55 : f.coherence, f.streetContrast == null ? 0.35 : f.streetContrast,
+    useFlow ? (focus ? focus.map(Math.round).join(',') : 'c') + ',' + (f.flowRadial == null ? 0.6 : f.flowRadial) : '',
     guides && guides.list.length ? guides.key : '',
-    f.pattern === 'radial' ? center.map(Math.round).join(',') : '', shapeKey(shape)].join('|');
+    pattern === 'radial' ? center.map(Math.round).join(',') : '', shapeKey(shape)].join('|');
   return remember(key, () => {
-    const g = subdivide(shape, {
-      pattern: f.pattern, blockSize: Math.max(6, +f.blockSize || 38), streetWidth: +f.streetWidth || 4,
+    const opts = {
+      pattern, blockSize: Math.max(6, +f.blockSize || 38), streetWidth: +f.streetWidth || 4,
       irregularity: +f.irregularity || 0, warp: +f.warp || 0, gridAngle: +f.gridAngle || 0,
       lots: !!f.lots, courtyards: +f.courtyards || 0, seed: (f.seed >>> 0) || 1, center,
       leaves: look !== 'blocks', guides: guides && guides.list.length ? guides.list : null, grad,
       variety: look === 'blocks' ? Math.max(0, Math.min(1, f.blockVariety == null ? 0.6 : +f.blockVariety)) : 0,
       coherence: f.coherence == null ? 0.55 : +f.coherence, contrast: f.streetContrast == null ? 0.35 : +f.streetContrast,
-    });
+      focus, radial: f.flowRadial == null ? 0.6 : +f.flowRadial,
+    };
+    const g = useFlow ? flowSubdivide(shape, opts) : subdivide(shape, opts);
     g.decor = look !== 'blocks' ? lookDecor(f, shape, g, look) : null;
     return g;
   });
@@ -485,4 +493,169 @@ export function trimStreets(g, F, bs, fade) {
   const nicks = (g.nicks || []).filter((p) => !near(p[0], dmax * 1.1));
   g.trim = { key, buckets, nicks };
   return g.trim;
+}
+
+// ---------- flowing streets ----------
+// Streets are traced along a direction field instead of cut straight, so they curve: long arcs that
+// follow nearby roads and the district edge, concentric rings and spokes around a focus point, and
+// gentle noise elsewhere. Major lines run along the field and minor lines across it, spaced apart
+// (Jobard-Lefer style) so the result reads as blocks between curving streets.
+function flowSubdivide(shape, o) {
+  const bs = o.blockSize, sb = bbox(shape);
+  const rnd = mulberry32((o.seed ^ 0x6d2b79f5) >>> 0);
+  const noise = makeNoise((o.seed ^ 0x1b873593) >>> 0);
+  const ga = (o.gridAngle * Math.PI) / 180;
+  const coh = o.coherence == null ? 0.55 : o.coherence;
+  const mode = o.pattern === 'rings' ? 'rings' : 'flow';
+  const C = o.focus || centroid(shape);
+  const radial = mode === 'rings' ? 2.6 : Math.max(0, o.radial == null ? 0.6 : o.radial) * 1.8;
+
+  // Hand-drawn roads pull the field parallel to themselves.
+  const infl = bs * 3.5 + 14;
+  const guides = o.guides ? o.guides.filter((gd) => gd.bb.x1 >= sb.x0 - infl && gd.bb.x0 <= sb.x1 + infl && gd.bb.y1 >= sb.y0 - infl && gd.bb.y0 <= sb.y1 + infl) : [];
+
+  // The district's own outline pulls it parallel to the edge, so streets bend round the boundary.
+  const eg = new Map(), ecell = Math.max(6, bs * 3);
+  const estep = Math.max(4, bs * 0.4);
+  for (let i = 0; i < shape.length; i++) {
+    const a = shape[i], b = shape[(i + 1) % shape.length], L = dist(a, b), t = norm(sub(b, a)), th = Math.atan2(t[1], t[0]);
+    const k = Math.max(1, Math.ceil(L / estep));
+    for (let j = 0; j < k; j++) {
+      const p = lerp(a, b, (j + 0.5) / k), key = Math.floor(p[0] / ecell) + ',' + Math.floor(p[1] / ecell);
+      if (!eg.has(key)) eg.set(key, []);
+      eg.get(key).push({ p, th });
+    }
+  }
+  function nearEdge(p) {
+    const cx = Math.floor(p[0] / ecell), cy = Math.floor(p[1] / ecell);
+    let best = null, bd = Infinity;
+    for (let x = cx - 1; x <= cx + 1; x++) {
+      for (let y = cy - 1; y <= cy + 1; y++) {
+        const list = eg.get(x + ',' + y);
+        if (!list) continue;
+        for (const e of list) { const d = (e.p[0] - p[0]) ** 2 + (e.p[1] - p[1]) ** 2; if (d < bd) { bd = d; best = e; } }
+      }
+    }
+    return best ? { d: Math.sqrt(bd), th: best.th } : null;
+  }
+
+  function field(p) {
+    let sx = 0, sy = 0;
+    const add = (th, w) => { sx += w * Math.cos(2 * th); sy += w * Math.sin(2 * th); };
+    const dx = p[0] - C[0], dy = p[1] - C[1];
+    if (radial > 0 && dx * dx + dy * dy > 4) add(Math.atan2(dy, dx), radial);
+    add(ga + noise(p[0] / (bs * 14), p[1] / (bs * 14)) * Math.PI * (0.15 + (1 - coh) * 0.5), mode === 'rings' ? 0.25 : 0.9);
+    if (guides.length) {
+      let bd = infl, dir = null;
+      for (const gd of guides) {
+        if (p[0] < gd.bb.x0 - bd || p[0] > gd.bb.x1 + bd || p[1] < gd.bb.y0 - bd || p[1] > gd.bb.y1 + bd) continue;
+        for (let i = 0; i < gd.pts.length - 1; i++) {
+          const r = projSeg(p, gd.pts[i], gd.pts[i + 1]);
+          if (r.d < bd) { bd = r.d; dir = gd.dirs[i]; }
+        }
+      }
+      if (dir) add(Math.atan2(dir[1], dir[0]), 3.2 * Math.exp(-bd / (bs * 3)));
+    }
+    const ne = nearEdge(p);
+    if (ne) add(ne.th, 1.7 * Math.exp(-ne.d / (bs * 2.4)));
+    return 0.5 * Math.atan2(sy, sx);
+  }
+
+  const step = Math.max(1.6, Math.min(4, bs * 0.12));
+  const MAXPTS = 90000;
+  let total = 0;
+  const inShape = (p) => pointInPoly(p, shape);
+  const makeSet = (dsep) => ({ dsep, cell: Math.max(dsep, 4), grid: new Map(), lines: [] });
+  const addPt = (s, p) => {
+    const k = Math.floor(p[0] / s.cell) + ',' + Math.floor(p[1] / s.cell);
+    let a = s.grid.get(k);
+    if (!a) { a = []; s.grid.set(k, a); }
+    a.push(p);
+  };
+  const nearPt = (s, p, r) => {
+    const r2 = r * r, cx = Math.floor(p[0] / s.cell), cy = Math.floor(p[1] / s.cell);
+    for (let x = cx - 1; x <= cx + 1; x++) {
+      for (let y = cy - 1; y <= cy + 1; y++) {
+        const a = s.grid.get(x + ',' + y);
+        if (a) for (const q of a) if ((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2 < r2) return true;
+      }
+    }
+    return false;
+  };
+
+  // Walk one way from the seed along the field (+off rotates the direction by a quarter turn for minor streets).
+  function walk(set, seed, off, sign, other, pStop) {
+    const pts = [];
+    let p = seed, v = [Math.cos(field(p) + off) * sign, Math.sin(field(p) + off) * sign], closed = false, crossing = false;
+    for (let n = 0; n < 1800; n++) {
+      let a = field(p) + off, v1 = [Math.cos(a), Math.sin(a)];
+      if (v1[0] * v[0] + v1[1] * v[1] < 0) v1 = [-v1[0], -v1[1]];
+      const pm = [p[0] + (v1[0] * step) / 2, p[1] + (v1[1] * step) / 2];
+      a = field(pm) + off;
+      let v2 = [Math.cos(a), Math.sin(a)];
+      if (v2[0] * v1[0] + v2[1] * v1[1] < 0) v2 = [-v2[0], -v2[1]];
+      const q = [p[0] + v2[0] * step, p[1] + v2[1] * step];
+      if (!inShape(q)) { pts.push(q); break; }
+      if (nearPt(set, q, set.dsep * 0.5)) break;
+      if (n > 12 && dist(q, seed) < step * 1.6) { closed = true; break; }
+      if (radial > 0 && dist(q, C) < bs * 0.55) break;   // keep the very middle open (a plaza goes there)
+      if (other && pStop > 0) {
+        if (nearPt(other, q, step * 1.3)) { if (!crossing) { crossing = true; if (rnd() < pStop) break; } } else crossing = false;
+      }
+      pts.push(q); p = q; v = v2;
+    }
+    return { pts, closed };
+  }
+
+  function seedList(dsep) {
+    const sp = dsep * 0.5, out = [];
+    for (let y = sb.y0; y <= sb.y1; y += sp) {
+      for (let x = sb.x0; x <= sb.x1; x += sp) {
+        const p = [x + (rnd() - 0.5) * sp * 0.8, y + (rnd() - 0.5) * sp * 0.8];
+        if (radial > 0 && dist(p, C) < bs * 0.7) continue;
+        if (inShape(p)) out.push(p);
+      }
+    }
+    for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+    return out;
+  }
+
+  function lay(set, dsep, off, other, pStop) {
+    for (const s of seedList(dsep)) {
+      if (total > MAXPTS) break;
+      if (nearPt(set, s, dsep * 0.9)) continue;
+      const fwd = walk(set, s, off, 1, other, pStop);
+      const back = fwd.closed ? { pts: [] } : walk(set, s, off, -1, other, pStop);
+      const pts = back.pts.reverse().concat([s], fwd.pts);
+      if (fwd.closed) pts.push(s);
+      let len = 0;
+      for (let i = 1; i < pts.length; i++) len += dist(pts[i - 1], pts[i]);
+      if (pts.length < 6 || len < bs * 0.8) continue;
+      for (const p of pts) addPt(set, p);
+      total += pts.length;
+      set.lines.push({ pts, len });
+    }
+  }
+
+  const majorOff = mode === 'rings' ? Math.PI / 2 : 0;
+  const major = makeSet(bs * (mode === 'rings' ? 0.95 : 1.15));
+  const minor = makeSet(bs * (mode === 'rings' ? 1.7 : 0.85));
+  lay(major, major.dsep, majorOff, null, 0);
+  lay(minor, minor.dsep, majorOff + Math.PI / 2, major, 0.3);
+
+  // Gentle wobble so nothing is mathematically perfect.
+  const fq = 1 / (bs * 3.5), A = (+o.warp || 0) * 0.35;
+  const Wp = (p) => (A ? [p[0] + noise(p[0] * fq + 3.3, p[1] * fq) * A, p[1] + noise(p[0] * fq + 41.7, p[1] * fq - 9.9) * A] : p);
+  const contrast = o.contrast == null ? 0.35 : o.contrast;
+  const lane = o.streetWidth, arcW = Math.round(lane * (1 + 2 * contrast) * 10) / 10;
+  const buckets = new Map();
+  const put = (w, line) => { if (!buckets.has(w)) buckets.set(w, []); buckets.get(w).push(line); };
+  for (const l of major.lines) {
+    const arc = l.len > bs * 7 && rnd() < 0.18;
+    const line = l.pts.map(Wp);
+    line.major = arc || l.len > bs * 10;
+    put(arc ? arcW : lane, line);
+  }
+  for (const l of minor.lines) { const line = l.pts.map(Wp); line.major = false; put(lane, line); }
+  return { buckets: [...buckets.entries()].sort((a, b) => b[0] - a[0]), lots: [], opens: [], leaves: [], nicks: [] };
 }

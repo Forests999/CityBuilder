@@ -149,7 +149,8 @@ export function generateCity(o) {
   }
   const c = G.centroid(outline);
   const Rm = Math.sqrt(Math.abs(G.polyArea(outline)) / Math.PI);
-  outline = simplifyClosed(outline, Rm * 0.01);
+  // Ragged edge: bumps and bites along the outline so the wall hugs a jagged, lived-in boundary.
+  outline = simplifyClosed(roughenOutline(outline, o.roughness == null ? 0.45 : o.roughness, seed), Rm * 0.004);
   const Rmax = Math.max(...outline.map((p) => G.dist(p, c)));
 
   if (o.walled) {
@@ -166,13 +167,19 @@ export function generateCity(o) {
   const presets = assignStyles(cells, c, outline, R);
   const dens = o.density || 'edge';
   const info = cells.map((cell, i) => ({ cell, preset: presets[i], cc: G.centroid(cell) }));
-  info.forEach(({ cell, preset }) => {
+  info.forEach(({ cell, preset, cc }) => {
     const base = { ...PRESETS[preset] };
-    if (base.pattern === 'radial') base.pattern = 'organic';
     const plain = !base.look || base.look === 'blocks';
+    // The old radial pattern becomes concentric rings; now and then an outer quarter is all rings and
+    // spokes too, like a dense old quarter built round a market or a gate.
+    const a = Math.atan2(cc[1] - c[1], cc[0] - c[0]), t = G.dist(cc, c) / (rayDist(c, a, outline) || 1);
+    if (base.pattern === 'radial') { base.pattern = 'rings'; base.blockSize = Math.round(base.blockSize * 0.62); }
+    else if (plain && base.pattern === 'flow' && t > 0.6 && R.chance(0.15)) base.pattern = 'rings';
+    if (base.pattern === 'flow') base.blockSize = Math.round(base.blockSize * 0.82);
     feats.push(createFeature('district', cell, {
       name: districtName(R), showLabel: true, labelSize: Math.round(clamp(Math.sqrt(Math.abs(G.polyArea(cell))) * 0.11, 20, 54)),
       ...base, preset, borderStreet: 3.5, seed: R.int(1, 1e9),
+      flowCenter: base.pattern === 'rings' && t > 0.6 ? cc.slice() : c.slice(), flowRadial: 0.65,
       gradMode: plain && dens !== 'none' ? dens : 'none', gradStrength: 0.6, gradCenter: c.slice(), gradRadius: Rmax,
     }));
   });
@@ -189,21 +196,44 @@ export function generateCity(o) {
     const pts = [c.slice(), at(0.3), at(0.62), at(0.95), at(1.25)];
     if (o.walled) pts.push(at(1.9));
     roadLines.push(pts);
-    feats.push(createFeature('road', pts, { kind: 'avenue', width: rw, ruralOutside: !!o.walled, gates: !!o.walled, smooth: true }));
+    feats.push(createFeature('road', pts, { kind: 'avenue', tier: 'artery', width: rw, ruralOutside: !!o.walled, gates: !!o.walled, smooth: true }));
     if (o.walled) {
       feats.push(createFeature('label', [G.add(c, G.scale(dir, rd * 1.14 + 50))], {
         text: R.pick(WORD) + ' Gate', style: 'gate', size: Math.round(clamp(Rm * 0.03, 18, 28)), spacing: 0.12,
       }));
     }
   }
+  // Three road tiers: wide arteries to the gates, medium arc roads (a ring plus partial arcs between
+  // arteries), and the thin generated lanes inside the districts.
+  const arcW = Math.round(clamp(rw * 0.55, 6, 9));
+  const tierItems = angles.map((a, i) => ({ pts: G.smoothPoints(roadLines[i], false, 8), closed: false, width: rw }));
+  const arcItems = [];
   if (o.ring) {
     const ringPts = [];
     for (let i = 0; i < 20; i++) { const a = (i / 20) * TAU; ringPts.push(G.add(c, G.scale(G.fromAngle(a), (rayDist(c, a, outline) || Rm) * 0.55))); }
+    feats.push(createFeature('road', ringPts, { kind: 'street', tier: 'arc', width: arcW, closed: true, ruralOutside: false, gates: false, smooth: true }));
     roadLines.push(ringPts.concat([ringPts[0]]));
-    feats.push(createFeature('road', ringPts, { kind: 'avenue', width: 8, closed: true, ruralOutside: false, gates: false, smooth: true }));
-    for (const a of angles) {
-      feats.push(createFeature('plaza', [G.add(c, G.scale(G.fromAngle(a), (rayDist(c, a, outline) || Rm) * 0.55))], { radius: 11, monument: R.pick(['fountain', 'dot', 'obelisk']) }));
+    arcItems.push({ pts: G.smoothPoints(ringPts, true, 8), closed: true, width: arcW });
+  }
+  const arcCount = clamp(Math.round(o.arcs == null ? 3 : o.arcs), 0, 6);
+  const angleAt = (idx) => angles[idx % gates] + (idx >= gates ? TAU : 0);
+  for (let k = 0; k < arcCount && gates > 2; k++) {
+    const frac = R.range(0.3, 0.82), i0 = R.int(0, gates - 1), span = R.int(1, Math.min(3, gates - 1));
+    const a1 = angleAt(i0) + 0.06, a2 = angleAt(i0 + span) - 0.06;
+    if (a2 <= a1) continue;
+    const pts = [];
+    for (let s = 0; s <= 10; s++) {
+      const a = a1 + ((a2 - a1) * s) / 10, rd = rayDist(c, a, outline) || Rm;
+      pts.push(G.add(c, G.scale(G.fromAngle(a), rd * frac * (1 + R.range(-0.025, 0.025)))));
     }
+    feats.push(createFeature('road', pts, { kind: 'street', tier: 'arc', width: arcW, ruralOutside: false, gates: false, smooth: true }));
+    roadLines.push(pts);
+    arcItems.push({ pts: G.smoothPoints(pts, false, 8), closed: false, width: arcW });
+  }
+  // Small round plazas where the main roads cross.
+  if (o.junctions !== false) {
+    const spots = junctionSpots([...tierItems, ...arcItems], [{ p: c, r: Math.round(clamp(Rm * 0.07, 18, 55)) }]);
+    for (const s of spots) feats.push(createFeature('plaza', [s.p], { radius: s.r, monument: 'dot' }));
   }
 
   // Central plaza with a citadel star, a market square, and large buildings
@@ -280,4 +310,44 @@ export function randomCityDoc(seed = Math.floor(Math.random() * 1e9), opts = {})
   doc.settings.seed = seed % 100000;
   doc.features = gen.features;
   return doc;
+}
+
+// ---------- road junctions ----------
+// Where major roads cross: [{ p, r }] for small round plazas. items: [{ pts, closed, width }] (dense polylines).
+// skip: spots that are already taken (existing plazas).
+export function junctionSpots(items, skip = []) {
+  const out = [];
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      for (const x of G.pathIntersections(items[i].pts, !!items[i].closed, items[j].pts, !!items[j].closed)) {
+        const r = Math.round(clamp(Math.max(items[i].width, items[j].width) * 0.75, 8, 20));
+        if ([...out, ...skip].some((q) => G.dist(q.p, x.p) < Math.max(14, r + q.r))) continue;
+        out.push({ p: x.p, r });
+      }
+    }
+  }
+  return out;
+}
+
+// ---------- ragged outline ----------
+// Pushes the outline in and out with two scales of noise, plus the odd notch, so the city edge is
+// jagged and irregular (and the wall that follows it hugs every bump) instead of a smooth blob.
+export function roughenOutline(pts, amt, seed) {
+  if (!amt || amt <= 0 || pts.length < 3) return pts;
+  const nz = makeNoise(((seed * 13 + 5) >>> 0)), Rm = Math.sqrt(Math.abs(G.polyArea(pts)) / Math.PI);
+  const dense = G.densify(pts, true, Math.max(8, Rm * 0.025));
+  const nrm = G.pathNormals(dense, true);
+  // Which way is outward? Test a few points.
+  let inward = 0;
+  for (let k = 0; k < Math.min(8, dense.length); k++) {
+    const i = Math.floor((k / 8) * dense.length), q = [dense[i][0] + nrm[i][0] * 3, dense[i][1] + nrm[i][1] * 3];
+    if (G.pointInPoly(q, pts)) inward++;
+  }
+  const sgn = inward > 4 ? -1 : 1, amp = Rm * 0.055 * amt;
+  return dense.map((p, i) => {
+    let d = amp * (nz(p[0] / (Rm * 0.25), p[1] / (Rm * 0.25)) + 0.6 * nz(p[0] / (Rm * 0.08), p[1] / (Rm * 0.08) + 7));
+    const nb = nz(p[0] / (Rm * 0.14) + 31, p[1] / (Rm * 0.14));
+    if (nb > 0.35) d -= amp * 3.2 * (nb - 0.35);
+    return [p[0] + nrm[i][0] * sgn * d, p[1] + nrm[i][1] * sgn * d];
+  });
 }

@@ -24,7 +24,7 @@ export const DEFAULTS = {
     name: 'New District', showLabel: true, labelSize: 42, labelAngle: 0, labelSpacing: 0.12, labelOffset: [0, 0], halo: null,
     preset: 'standard', ...PRESETS.standard, gridAngle: 0, color: '', borderStreet: 3,
     treeSpacing: 15, treeDensity: 0.55, graveSpacing: 8, alignRoads: true,
-    gradMode: 'none', gradStrength: 0.6, gradCenter: null, gradRadius: 0, border: true, blockVariety: 0.6, edgeFade: 0.45, coherence: 0.55, streetContrast: 0.35,
+    gradMode: 'none', gradStrength: 0.6, gradCenter: null, gradRadius: 0, border: true, blockVariety: 0.6, edgeFade: 0.45, coherence: 0.55, streetContrast: 0.35, flowCenter: null, flowRadial: 0.6,
     smooth: false, followWall: '', clipWall: '', seed: 1,
   },
   cutout: { name: '', fill: 'none', gap: 0, border: true, smooth: false },
@@ -35,7 +35,7 @@ export const DEFAULTS = {
   },
   water: { name: '', showLabel: false, labelSize: 48, labelAngle: 0, labelSpacing: 0.25, labelOffset: [0, 0], halo: null, coastLines: 3, gap: null, border: true, smooth: true },
   river: { name: 'River', showLabel: true, labelSize: 34, labelSpacing: 1.0, labelPos: 0.5, labelOpacity: 0.7, halo: null, width: 60, wobble: 0.15, canal: false, gap: null, border: true, smooth: true },
-  road: { name: '', kind: 'avenue', width: 13, ruralOutside: true, gates: true, closed: false, steer: true, border: true, smooth: true },
+  road: { name: '', kind: 'avenue', width: 13, ruralOutside: true, gates: true, closed: false, steer: true, border: true, tier: 'artery', smooth: true },
   plaza: { name: '', border: true, radius: 22, shape: 'round', aspect: 1, angle: 0, monument: 'dot' },
   building: {
     name: '', style: 'solid', tone: 'normal', hatch: true, color: '', gap: null, border: true, blend: false, fingers: 4, smooth: false,
@@ -96,6 +96,8 @@ function migrate(doc, version) {
   doc.version = 3;
 }
 
+export const tierOfWidth = (w) => (w >= 11 ? 'artery' : w >= 6 ? 'arc' : 'lane');
+
 function normalize(d) {
   const doc = blankDoc();
   if (d && typeof d === 'object') {
@@ -104,6 +106,7 @@ function normalize(d) {
     doc.settings.colors = { ...(d.settings && d.settings.colors) };
     doc.features = Array.isArray(d.features) ? d.features.filter((f) => f && DEFAULTS[f.type]).map((f) => ({
       ...clone(DEFAULTS[f.type]), ...f, id: f.id || newId(), points: Array.isArray(f.points) ? f.points : [],
+      ...(f.type === 'road' && !f.tier ? { tier: tierOfWidth(f.width) } : {}),
     })) : [];
     migrate(doc, d.version || 1);
   }

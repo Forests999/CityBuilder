@@ -24,7 +24,7 @@ const app = {
   tool: 'select', _sel: null, selSet: new Set(), drawing: null, drag: null, hover: null, snap: null, guides: { gx: null, gy: null },
   hits: [], space: false, mouse: null, tab: 'props', marquee: null, kit: null, kitState: defaultKitState(),
   genOutline: null, exportScale: 2,
-  gen: { districts: 6, gates: 6, walled: true, river: 'through', ring: true, farmland: true, density: 'edge', halls: 6, splitMode: 'center', size: 650, seed: Math.floor(Math.random() * 1e9), clear: true },
+  gen: { districts: 6, gates: 6, walled: true, river: 'through', ring: true, farmland: true, density: 'edge', halls: 6, splitMode: 'center', size: 650, roughness: 0.45, arcs: 3, junctions: true, seed: Math.floor(Math.random() * 1e9), clear: true },
   split: { n: 5, mode: 'center', vary: true },
 };
 Object.defineProperty(app, 'sel', {
@@ -67,8 +67,8 @@ const TOOLS = [
   { id: 'water', key: 'a', type: 'water', draw: 'poly', label: 'Lake / sea / bay', hint: 'Outline a body of water (drag to sketch a coastline) · double-click to finish' },
   { id: 'river', key: 'f', type: 'river', draw: 'line', label: 'River', hint: 'Click points along the river (or drag freehand) · double-click / Enter to finish' },
   { id: 'canal', key: 'n', type: 'river', draw: 'line', label: 'Canal', extra: { canal: true, width: 15, name: '', showLabel: false, smooth: false }, hint: 'Click points along the canal · double-click to finish' },
-  { id: 'road', key: 'r', type: 'road', draw: 'line', label: 'Avenue', extra: { kind: 'avenue', width: 13 }, hint: 'Click points along the avenue; it snaps to other points and edges (hold Alt to not snap, Shift for 15° steps) · double-click to finish' },
-  { id: 'street', key: 's', type: 'road', draw: 'line', label: 'Street', extra: { kind: 'street', width: 6, ruralOutside: false }, hint: 'Draw a hand-placed street · double-click to finish' },
+  { id: 'road', key: 'r', type: 'road', draw: 'line', label: 'Avenue', extra: { kind: 'avenue', tier: 'artery', width: 14 }, hint: 'Click points along the main avenue; it snaps to other points and edges (hold Alt to not snap, Shift for 15° steps) · double-click to finish' },
+  { id: 'street', key: 's', type: 'road', draw: 'line', label: 'Street', extra: { kind: 'street', tier: 'arc', width: 8, ruralOutside: false }, hint: 'Draw a medium arc road or street · double-click to finish' },
   { id: 'rural', key: 'u', type: 'road', draw: 'line', label: 'Country road', extra: { kind: 'rural', width: 6 }, hint: 'Thin road through the countryside · double-click to finish' },
   { id: 'plaza', key: 'p', type: 'plaza', draw: 'point', label: 'Round plaza', hint: 'Click to place a round plaza' },
   { id: 'plazaSq', key: 'q', type: 'plaza', draw: 'point', label: 'Square plaza', extra: { shape: 'square', radius: 28, monument: 'none' }, hint: 'Click to place a square plaza; set rotation and proportions in the panel' },
@@ -81,6 +81,7 @@ const TOOLS = [
   { id: 'compass', key: 'c', type: 'compass', draw: 'point', label: 'Compass rose', hint: 'Click to place a compass rose' },
   { id: 'kit', hidden: true, draw: 'point', label: 'Place kit', hint: 'Click where the kit should go · Esc cancels' },
   { id: 'outline', hidden: true, draw: 'poly', label: 'Draw city outline', hint: 'Sketch the outline of your city (drag to draw freehand, or click corners) · double-click or Enter to finish · Esc cancels' },
+  { id: 'focus', hidden: true, draw: 'point', label: 'Set focus point', hint: 'Click where the streets should flow around · Esc cancels' },
 ];
 const toolById = (id) => TOOLS.find((t) => t.id === id);
 
@@ -596,6 +597,7 @@ const ctxHelpers = {
   detachLabel(f) { f.pathId = ''; S.commit(); },
   autoSplitUI(target, f) { buildAutoSplit(target, f); },
   gapDefault() { return S.getDoc().settings.featureGap ?? 4; },
+  pickFocus(f) { app.focusTarget = f.id; setTool('focus'); toast('Click the map where the streets should flow around.'); },
   // Rebuild a preset-shaped building around its current centre.
   reshapeBuilding(f) {
     if (f.shape === 'free' || !f.points.length) return;
@@ -698,6 +700,12 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (e.button !== 0) return;
 
+  if (tool.id === 'focus') {
+    const fd = S.byId(app.focusTarget);
+    if (fd) { fd.flowCenter = snapPoint(w, e.altKey).slice(); S.commit(); }
+    app.focusTarget = null; clearSnap(); setTool('select');
+    return;
+  }
   if (tool.id === 'kit') {
     if (app.kit) placeKit(app.kit.def, app.kit.params, snapPoint(w, e.altKey));
     clearSnap();
@@ -1125,8 +1133,11 @@ function renderGenerate(body) {
     { k: 'walled', label: 'City wall with gates', t: 'check' },
     { k: 'gates', label: 'Main roads', t: 'range', min: 2, max: 12, step: 1 },
     { k: 'ring', label: 'Ring road', t: 'check' },
+    { k: 'arcs', label: 'Arc roads', t: 'range', min: 0, max: 6, step: 1 },
+    { k: 'junctions', label: 'Plazas at junctions', t: 'check' },
     { k: 'river', label: 'River', t: 'select', options: [['through', 'Through the city'], ['edge', 'Along one side'], ['none', 'None']] },
     { k: 'farmland', label: 'Farmland outside', t: 'check' },
+    { k: 'roughness', label: 'Edge roughness', t: 'range', min: 0, max: 1, step: 0.05 },
     { k: 'halls', label: 'Large buildings', t: 'range', min: 0, max: 20, step: 1 },
     { k: 'size', label: 'Size (random shape)', t: 'range', min: 250, max: 1100, step: 10, show: () => !app.genOutline },
     { k: 'seed', label: 'Seed', t: 'seed' },
@@ -1134,6 +1145,10 @@ function renderGenerate(body) {
   ], g, { onInput() {}, onCommit() {}, rebuild: () => renderPanel() });
   city.append(el('button', { class: 'primary wide', onclick: runGenerate }, '✨ Generate city'));
   if (!g.clear) city.append(el('p', { class: 'info' }, 'The new city will be added to what is already on the map.'));
+
+  const roads = collapsible(body, 'Roads & plazas', { key: 'gen-roads' });
+  roads.append(el('p', { class: 'info' }, 'Roads come in three classes: wide main avenues, medium arc roads and thin lanes (set per road in the Edit tab). This adds a small round plaza wherever two main or arc roads cross.'));
+  roads.append(el('button', { class: 'wide', onclick: addJunctionPlazas }, '◉ Add plazas at major junctions'));
 
   const kits = collapsible(body, 'Kits: ready-made groups', { key: 'gen-kits', collapsed: true });
   kits.append(el('p', { class: 'info' }, 'Place a whole group at once: pick a kit, set its size, press Place, then click the map. The pieces arrive selected together so you can drag them into position as one.'));
@@ -1174,8 +1189,8 @@ function autoSplit(f, n, mode, vary, dense) {
     d.labelSize = Math.round(Math.max(14, Math.min(54, Math.sqrt(Math.abs(G.polyArea(cell))) * 0.11)));
     if (presets) {
       const pr = { ...PRESETS[presets[i]] };
-      if (pr.pattern === 'radial') pr.pattern = 'organic';
-      Object.assign(d, pr, { preset: presets[i] });
+      if (pr.pattern === 'radial') pr.pattern = 'rings';
+      Object.assign(d, pr, { preset: presets[i], flowCenter: c.slice() });
     }
     if (dense && (d.look || 'blocks') === 'blocks') Object.assign(d, { gradMode: 'edge', gradStrength: 0.6, gradCenter: c.slice(), gradRadius: radius });
     if (i > 0) doc.features.splice(doc.features.indexOf(f) + i, 0, d);
@@ -1523,4 +1538,17 @@ if (document.fonts) {
   for (const f of FONTS) document.fonts.load(`600 20px "${f}"`).catch(() => {});
   document.fonts.ready.then(requestRender);
   document.fonts.addEventListener && document.fonts.addEventListener('loadingdone', requestRender);
+}
+
+// Add a small round plaza wherever two main (avenue / arc) roads cross.
+function addJunctionPlazas() {
+  const doc = S.getDoc();
+  const roads = doc.features.filter((f) => f.type === 'road' && !f.hidden && f.kind !== 'rural' && (f.tier === 'artery' || f.tier === 'arc' || f.width >= 7));
+  const items = roads.map((f) => ({ pts: featureShape(f, doc), closed: !!f.closed, width: f.width })).filter((i) => i.pts.length >= 2);
+  const existing = doc.features.filter((f) => f.type === 'plaza' && f.points[0]).map((f) => ({ p: f.points[0], r: f.radius }));
+  const spots = CG.junctionSpots(items, existing);
+  if (!spots.length) { toast('No new junctions found: either no main roads cross, or they already have plazas.'); return; }
+  for (const s of spots) S.insertFeature(S.createFeature('plaza', [s.p], { radius: s.r, monument: 'dot' }));
+  S.commit();
+  toast(`Added ${spots.length} junction plaza${spots.length > 1 ? 's' : ''}.`);
 }
