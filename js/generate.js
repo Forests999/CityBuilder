@@ -11,12 +11,12 @@ import { polyArea, centroid, bbox, pointInPoly, splitConvex, extentAlong, fromAn
 import { mulberry32, makeNoise } from './rng.js';
 
 export const PRESETS = {
-  standard:   { pattern: 'flow',    blockSize: 38, streetWidth: 4,   irregularity: 0.45, warp: 10, lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
-  dense:      { pattern: 'flow',    blockSize: 20, streetWidth: 2.6, irregularity: 0.6,  warp: 7,  lots: false, courtyards: 0,    tone: 'dark',   hatch: true, look: 'blocks' },
+  standard:   { pattern: 'organic', blockSize: 38, streetWidth: 4,   irregularity: 0.45, warp: 10, lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
+  dense:      { pattern: 'organic', blockSize: 20, streetWidth: 2.6, irregularity: 0.6,  warp: 7,  lots: false, courtyards: 0,    tone: 'dark',   hatch: true, look: 'blocks' },
   noble:      { pattern: 'radial',  blockSize: 70, streetWidth: 5.5, irregularity: 0.3,  warp: 5,  lots: false, courtyards: 0.25, tone: 'light',  hatch: true, look: 'blocks' },
   radial:     { pattern: 'radial',  blockSize: 40, streetWidth: 4,   irregularity: 0.45, warp: 6,  lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
   grid:       { pattern: 'grid',    blockSize: 45, streetWidth: 4,   irregularity: 0.15, warp: 2,  lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
-  townhouses: { pattern: 'flow',    blockSize: 60, streetWidth: 4.5, irregularity: 0.5,  warp: 3,  lots: true,  courtyards: 0.12, tone: 'normal', hatch: false, look: 'blocks' },
+  townhouses: { pattern: 'organic', blockSize: 60, streetWidth: 4.5, irregularity: 0.5,  warp: 3,  lots: true,  courtyards: 0.12, tone: 'normal', hatch: false, look: 'blocks' },
   industrial: { pattern: 'grid',    blockSize: 85, streetWidth: 5,   irregularity: 0.25, warp: 1,  lots: true,  courtyards: 0.05, tone: 'dark',   hatch: true, look: 'blocks' },
   market:     { pattern: 'grid',    blockSize: 26, streetWidth: 2.4, irregularity: 0.2,  warp: 1.5, lots: true,  courtyards: 0.2,  tone: 'light',  hatch: false, look: 'blocks' },
   cemetery:   { pattern: 'grid',    blockSize: 80, streetWidth: 2.2, irregularity: 0.1,  warp: 2,  lots: false, courtyards: 0,    tone: 'park',   hatch: false, look: 'cemetery', graveSpacing: 8 },
@@ -81,9 +81,9 @@ export function districtGen(f, shape, center, guides) {
   const look = f.look || 'blocks';
   const grad = gradientOf(f, shape);
   // Flowing and ring patterns trace streets along a direction field; they only apply to building districts.
-  let pattern = f.pattern;
-  if (look !== 'blocks' && (pattern === 'flow' || pattern === 'rings')) pattern = 'organic';
-  const useFlow = pattern === 'flow' || pattern === 'rings';
+  let pattern = f.pattern === 'flow' ? 'organic' : f.pattern === 'rings' ? 'radial' : f.pattern;
+  if (look !== 'blocks' && (pattern === 'flowing' || pattern === 'rings')) pattern = 'organic';
+  const useFlow = pattern === 'flowing';
   const focus = Array.isArray(f.flowCenter) && f.flowCenter.length === 2 ? f.flowCenter : (Array.isArray(f.gradCenter) && f.gradCenter.length === 2 ? f.gradCenter : null);
   const key = ['d', pattern, f.blockSize, f.streetWidth, f.irregularity, f.warp, f.gridAngle, f.lots, f.courtyards, f.seed, look,
     look === 'garden' ? f.treeSpacing + ',' + f.treeDensity : look === 'cemetery' ? f.graveSpacing : '',

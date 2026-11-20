@@ -173,9 +173,6 @@ export function generateCity(o) {
     // The old radial pattern becomes concentric rings; now and then an outer quarter is all rings and
     // spokes too, like a dense old quarter built round a market or a gate.
     const a = Math.atan2(cc[1] - c[1], cc[0] - c[0]), t = G.dist(cc, c) / (rayDist(c, a, outline) || 1);
-    if (base.pattern === 'radial') { base.pattern = 'rings'; base.blockSize = Math.round(base.blockSize * 0.62); }
-    else if (plain && base.pattern === 'flow' && t > 0.6 && R.chance(0.15)) base.pattern = 'rings';
-    if (base.pattern === 'flow') base.blockSize = Math.round(base.blockSize * 0.82);
     feats.push(createFeature('district', cell, {
       name: districtName(R), showLabel: true, labelSize: Math.round(clamp(Math.sqrt(Math.abs(G.polyArea(cell))) * 0.11, 20, 54)),
       ...base, preset, borderStreet: 3.5, seed: R.int(1, 1e9),

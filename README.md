@@ -127,8 +127,7 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 
 ## Luthadel-style streets and roads
 
-- **Flowing streets:** the default pattern for building districts. Streets are traced along a direction field instead of cut straight, so they curve: long arcs that follow nearby roads and the district edge, with a pull toward a *focus point* (set it on the map with *Set focus point*). Major lines run along the field and minor lines across it, giving blocks between curving streets.
-- **Concentric rings + spokes:** an alternative pattern that builds rings round the focus point joined by spokes, for a city core or a dense old quarter. Generated cities use it for the center and sometimes an outer quarter.
+- **Flowing streets (experimental):** an optional pattern, not the default (the organic generator, with open squares and block variety, is). Streets are traced along a direction field instead of cut straight, so they curve: long arcs that follow nearby roads and the district edge, with a pull toward a *focus point* (set it on the map with *Set focus point*). Major lines run along the field and minor lines across it, giving blocks between curving streets.
 - **Road classes:** every road is a *Main avenue* (wide), *Arc road* (medium) or *Lane* (thin); picking a class sets its kind and width. Generated cities have wide arteries to the gates, a ring road and partial arc roads between arteries, with thin generated lanes inside the districts.
 - **Junction plazas:** generated cities put a small round plaza with a dot where main and arc roads cross. In any map, *Generate → Roads & plazas → Add plazas at major junctions* does the same.
 - **Ragged outline:** *Edge roughness* in the city wizard pushes the outline in and out with bumps and notches, so the wall hugs a jagged city edge. It applies to both sketched and random outlines.

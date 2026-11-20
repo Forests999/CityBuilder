@@ -1189,7 +1189,6 @@ function autoSplit(f, n, mode, vary, dense) {
     d.labelSize = Math.round(Math.max(14, Math.min(54, Math.sqrt(Math.abs(G.polyArea(cell))) * 0.11)));
     if (presets) {
       const pr = { ...PRESETS[presets[i]] };
-      if (pr.pattern === 'radial') pr.pattern = 'rings';
       Object.assign(d, pr, { preset: presets[i], flowCenter: c.slice() });
     }
     if (dense && (d.look || 'blocks') === 'blocks') Object.assign(d, { gradMode: 'edge', gradStrength: 0.6, gradCenter: c.slice(), gradRadius: radius });
