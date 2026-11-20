@@ -395,11 +395,11 @@ function subdivide(shape, o) {
       const L = dist(p, q);
       const hh0 = h32(Math.round(a[1] * 3 + b[0] * 17), Math.round(a[0] * 11 + b[1] * 5));
       const big = L >= bs * 7 && L0 > bs * 7;
-      if (!big && (((hh0 >>> 5) % 100) >= 11 || L < bs * 2.2)) continue;
+      if (!big && (((hh0 >>> 5) % 100) >= 14 || L < bs * 2.2)) continue;
       const hh = h32(Math.round(a[0] * 7 + b[1] * 13), Math.round(a[1] * 5 + b[0] * 11));
       const d = norm(sub(q, p));
       bows.push({ p, d, L, nx: -d[1], ny: d[0], sgn: (hh & 1) ? 1 : -1, ph: ((hh >>> 9) % 100) / 100 * 6.28,
-        amp: (big ? Math.min(L * 0.05, bs * 1.1) : Math.min(L * 0.07, bs * 0.55)) * o.curve * (0.6 + ((hh >>> 3) % 100) / 250), R: big ? bs * 4 : bs * 1.8 });
+        amp: (big ? Math.min(L * 0.05, bs * 1.1) : Math.min(L * 0.15, bs * 1.2)) * o.curve * (0.6 + ((hh >>> 3) % 100) / 250), R: big ? bs * 4 : bs * 2.6 });
     }
   }
   const BR = bs * 4;
