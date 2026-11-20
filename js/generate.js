@@ -11,8 +11,8 @@ import { polyArea, centroid, bbox, pointInPoly, splitConvex, extentAlong, fromAn
 import { mulberry32, makeNoise } from './rng.js';
 
 export const PRESETS = {
-  standard:   { pattern: 'organic', blockSize: 38, streetWidth: 4,   irregularity: 0.6,  warp: 10, lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
-  dense:      { pattern: 'organic', blockSize: 20, streetWidth: 2.6, irregularity: 0.9,  warp: 7,  lots: false, courtyards: 0,    tone: 'dark',   hatch: true, look: 'blocks' },
+  standard:   { pattern: 'organic', blockSize: 38, streetWidth: 4,   irregularity: 0.45, warp: 10, lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
+  dense:      { pattern: 'organic', blockSize: 20, streetWidth: 2.6, irregularity: 0.6,  warp: 7,  lots: false, courtyards: 0,    tone: 'dark',   hatch: true, look: 'blocks' },
   noble:      { pattern: 'radial',  blockSize: 70, streetWidth: 5.5, irregularity: 0.3,  warp: 5,  lots: false, courtyards: 0.25, tone: 'light',  hatch: true, look: 'blocks' },
   radial:     { pattern: 'radial',  blockSize: 40, streetWidth: 4,   irregularity: 0.45, warp: 6,  lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
   grid:       { pattern: 'grid',    blockSize: 45, streetWidth: 4,   irregularity: 0.15, warp: 2,  lots: false, courtyards: 0,    tone: 'normal', hatch: true, look: 'blocks' },
@@ -51,7 +51,15 @@ export function prepGuides(polys) {
     const pts = [poly[0]];
     for (let i = 1; i < poly.length; i++) if (dist(pts[pts.length - 1], poly[i]) >= 14 || i === poly.length - 1) pts.push(poly[i]);
     if (pts.length < 2) continue;
-    list.push({ pts, bb: bbox(pts) });
+    // Smoothed direction per segment (averaged over its neighbours) so a bend doesn't fan the streets out.
+    const raw = [];
+    for (let i = 0; i < pts.length - 1; i++) raw.push(norm(sub(pts[i + 1], pts[i])));
+    const dirs = raw.map((_, i) => {
+      let x = 0, y = 0;
+      for (let k = Math.max(0, i - 2); k <= Math.min(raw.length - 1, i + 2); k++) { x += raw[k][0]; y += raw[k][1]; }
+      return norm([x, y]);
+    });
+    list.push({ pts, dirs, bb: bbox(pts) });
     for (const p of pts) h = h32(h, (Math.round(p[0] / 3) * 73856093) ^ (Math.round(p[1] / 3) * 19349663));
   }
   return { list, key: list.length + ':' + h };
@@ -75,7 +83,7 @@ export function districtGen(f, shape, center, guides) {
   const key = ['d', f.pattern, f.blockSize, f.streetWidth, f.irregularity, f.warp, f.gridAngle, f.lots, f.courtyards, f.seed, look,
     look === 'garden' ? f.treeSpacing + ',' + f.treeDensity : look === 'cemetery' ? f.graveSpacing : '',
     grad ? [grad.mode, grad.strength, Math.round(grad.c[0]), Math.round(grad.c[1]), Math.round(grad.r)].join(',') : '',
-    f.blockVariety == null ? 0.6 : f.blockVariety,
+    f.blockVariety == null ? 0.6 : f.blockVariety, f.coherence == null ? 0.55 : f.coherence, f.streetContrast == null ? 0.35 : f.streetContrast,
     guides && guides.list.length ? guides.key : '',
     f.pattern === 'radial' ? center.map(Math.round).join(',') : '', shapeKey(shape)].join('|');
   return remember(key, () => {
@@ -85,6 +93,7 @@ export function districtGen(f, shape, center, guides) {
       lots: !!f.lots, courtyards: +f.courtyards || 0, seed: (f.seed >>> 0) || 1, center,
       leaves: look !== 'blocks', guides: guides && guides.list.length ? guides.list : null, grad,
       variety: look === 'blocks' ? Math.max(0, Math.min(1, f.blockVariety == null ? 0.6 : +f.blockVariety)) : 0,
+      coherence: f.coherence == null ? 0.55 : +f.coherence, contrast: f.streetContrast == null ? 0.35 : +f.streetContrast,
     });
     g.decor = look !== 'blocks' ? lookDecor(f, shape, g, look) : null;
     return g;
@@ -210,7 +219,7 @@ function subdivide(shape, o) {
 
   // Hand-drawn roads and rivers steer nearby cuts: streets end up running parallel to,
   // or crossing at right angles to, the road they sit next to. The pull fades with distance.
-  const infl = bs * 5 + 20;
+  const infl = bs * 3.5 + 14;
   const guides = o.guides ? o.guides.filter((gd) => gd.bb.x1 >= sb.x0 - infl && gd.bb.x0 <= sb.x1 + infl && gd.bb.y1 >= sb.y0 - infl && gd.bb.y0 <= sb.y1 + infl) : [];
   function steer(n, c) {
     let bd = infl, dir = null;
@@ -218,15 +227,30 @@ function subdivide(shape, o) {
       if (c[0] < gd.bb.x0 - bd || c[0] > gd.bb.x1 + bd || c[1] < gd.bb.y0 - bd || c[1] > gd.bb.y1 + bd) continue;
       for (let i = 0; i < gd.pts.length - 1; i++) {
         const r = projSeg(c, gd.pts[i], gd.pts[i + 1]);
-        if (r.d < bd) { bd = r.d; dir = norm(sub(gd.pts[i + 1], gd.pts[i])); }
+        if (r.d < bd) { bd = r.d; dir = gd.dirs[i]; }
       }
     }
     if (!dir) return n;
-    const w = Math.max(0, Math.min(1, 1.15 - bd / infl));
+    const w = Math.max(0, Math.min(0.75, 1 - bd / infl));
     const pa = dir, pb = perp(dir);
     let t = Math.abs(n[0] * pa[0] + n[1] * pa[1]) >= Math.abs(n[0] * pb[0] + n[1] * pb[1]) ? pa : pb;
     if (n[0] * t[0] + n[1] * t[1] < 0) t = [-t[0], -t[1]];
     return norm([n[0] * (1 - w) + t[0] * w, n[1] * (1 - w) + t[1] * w]);
+  }
+
+  // "Street order": nearby cuts lean toward a shared, slowly changing pair of directions, so streets run
+  // roughly parallel with right-angle crossings and neighbouring blocks match, instead of every cell
+  // choosing its own angle (which weaves long streets into triangular webs).
+  const coh = o.coherence == null ? 0 : Math.max(0, Math.min(1, o.coherence));
+  const contrast = o.contrast == null ? 1 : o.contrast;
+  const field = makeNoise((o.seed ^ 0x2f6b9d1) >>> 0);
+  function orderly(n, c) {
+    if (coh <= 0) return n;
+    const th = ga + field(c[0] / (bs * 16), c[1] / (bs * 16)) * 0.6;
+    const pa = [Math.cos(th), Math.sin(th)], pb = [-pa[1], pa[0]];
+    let t = Math.abs(n[0] * pa[0] + n[1] * pa[1]) >= Math.abs(n[0] * pb[0] + n[1] * pb[1]) ? pa : pb;
+    if (n[0] * t[0] + n[1] * t[1] < 0) t = [-t[0], -t[1]];
+    return norm([n[0] * (1 - coh) + t[0] * coh, n[1] * (1 - coh) + t[1] * coh]);
   }
 
   // Cut straight across the longest edge, near its middle: gives squarish,
@@ -237,7 +261,11 @@ function subdivide(shape, o) {
     for (let i = 0; i < m; i++) { const L = dist(poly[i], poly[(i + 1) % m]); if (L > bl) { bl = L; bi = i; } }
     const a = poly[bi], b = poly[(bi + 1) % m];
     let n = rotate(norm(sub(b, a)), (rnd() - 0.5) * jitter);
-    if (steered && guides.length) n = steer(n, centroid(poly));
+    if (steered) {
+      const c0 = centroid(poly);
+      n = orderly(n, c0);
+      if (guides.length) n = steer(n, c0);
+    }
     return splitConvex(poly, lerp(a, b, 0.5 + (rnd() - 0.5) * spread), n);
   }
 
@@ -364,10 +392,12 @@ function subdivide(shape, o) {
       if (!clipped) continue;
       [p, q] = clipped;
     }
-    const k = L0 > bs * 7 ? 1.9 : L0 > bs * 3.5 ? 1.35 : L0 < bs * 0.9 ? 0.75 : 1;
-    const w = Math.round(o.streetWidth * k * 10) / 10;
+    const k0 = L0 > bs * 7 ? 1.9 : L0 > bs * 3.5 ? 1.35 : L0 < bs * 0.9 ? 0.75 : 1;
+    const w = Math.round(o.streetWidth * (1 + (k0 - 1) * contrast) * 10) / 10;
     if (!buckets.has(w)) buckets.set(w, []);
-    buckets.get(w).push(line(p, q));
+    const ln = line(p, q);
+    ln.major = L0 > bs * 3.5;
+    buckets.get(w).push(ln);
   }
   return {
     buckets: [...buckets.entries()].sort((a, b) => b[0] - a[0]),
@@ -417,8 +447,8 @@ export function trimStreets(g, F, bs, fade) {
   const dmax = bs * 1.3 * fade;
   let key = fade + '|' + bs + '|' + F.length;
   for (let i = 0; i < F.length; i += 3) key += '|' + Math.round(F[i][0]) + ',' + Math.round(F[i][1]);
-  if (g.trim && g.trim.key === key) return g.trim.buckets;
-  const cell = Math.max(4, dmax), grid = new Map();
+  if (g.trim && g.trim.key === key) return g.trim;
+  const cell = Math.max(4, dmax * 1.2), grid = new Map();
   for (const q of F) {
     const k = Math.floor(q[0] / cell) + ',' + Math.floor(q[1] / cell);
     if (!grid.has(k)) grid.set(k, []);
@@ -439,6 +469,9 @@ export function trimStreets(g, F, bs, fade) {
     const kept = [];
     for (const l of lines) {
       const dc = dmax * (0.35 + 0.65 * mulberry32(h32(Math.round(l[0][0] * 3), Math.round(l[0][1] * 3)))());
+      // Now and then a street still runs right out to the edge: most major streets, and the odd minor one.
+      const lucky = mulberry32(h32(Math.round(l[0][1] * 3) + 17, Math.round(l[0][0] * 3) + 5))();
+      if ((l.major && lucky < 0.7) || lucky < 0.06) { kept.push(l); continue; }
       let cur = [];
       for (const p of l) {
         if (!near(p, dc)) cur.push(p);
@@ -448,6 +481,8 @@ export function trimStreets(g, F, bs, fade) {
     }
     return [w, kept];
   });
-  g.trim = { key, buckets };
-  return buckets;
+  // Block bites next to a removed street would float as isolated pockets, so drop those too.
+  const nicks = (g.nicks || []).filter((p) => !near(p[0], dmax * 1.1));
+  g.trim = { key, buckets, nicks };
+  return g.trim;
 }

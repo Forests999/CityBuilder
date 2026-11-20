@@ -643,7 +643,7 @@ export function renderMap(ctx, doc, o) {
   // Roads and rivers that nearby generated streets line up with.
   let guidesCache = null;
   const getGuides = () => guidesCache || (guidesCache = prepGuides(
-    feats.filter((f) => (f.type === 'road' && f.kind !== 'rural' && f.steer !== false && f.carve !== false) || f.type === 'river').map((f) => shape.get(f.id)).filter((s) => s.length >= 2)));
+    feats.filter((f) => (f.type === 'road' && f.kind !== 'rural' && f.steer !== false && f.carve !== false)).map((f) => shape.get(f.id)).filter((s) => s.length >= 2)));
   let riverPolysCache = null;
   const riverPolys = () => riverPolysCache || (riverPolysCache = feats.filter((f) => f.type === 'river' && shape.get(f.id).length >= 2).map((f) => riverGeo(f).poly));
   // Slightly inset so a river's fill overlaps the lake's fill by a hair (no antialiasing line where they meet).
@@ -704,12 +704,12 @@ export function renderMap(ctx, doc, o) {
     for (const x of items) x.g = districtGen(x.d, x.sh, center, x.d.alignRoads ? getGuides() : null);
     // Where a district has no neighbour, generated streets stop short of the edge so the city ends cleanly.
     for (const x of items) {
-      x.buckets = x.g.buckets;
+      x.buckets = x.g.buckets; x.nicks = x.g.nicks;
       const fade = +x.d.edgeFade || 0;
       if (fade > 0 && (x.d.look || 'blocks') === 'blocks') {
         const others = feats.filter((o) => o.type === 'district' && o.id !== x.d.id && shape.get(o.id).length >= 3).map((o) => shape.get(o.id));
         const F = freeEdgePoints(x.sh, others);
-        if (F.length) x.buckets = trimStreets(x.g, F, +x.d.blockSize || 38, fade);
+        if (F.length) { const t = trimStreets(x.g, F, +x.d.blockSize || 38, fade); x.buckets = t.buckets; x.nicks = t.nicks; }
       }
     }
     const within = (g, x, fn) => { g.save(); if (x.clip) x.clip(g); fn(); g.restore(); };
@@ -781,9 +781,9 @@ export function renderMap(ctx, doc, o) {
             if (ex) { g.lineWidth = 2 * ex; g.stroke(); }
           }
           // Block corners, notches and curved bites (so blocks aren't all plain polygons).
-          if (x.g.nicks && x.g.nicks.length) {
+          if (x.nicks && x.nicks.length) {
             g.beginPath();
-            for (const p of x.g.nicks) addPath(g, p, true);
+            for (const p of x.nicks) addPath(g, p, true);
             g.fill();
             if (ex) { g.lineWidth = 2 * ex; g.stroke(); }
           }
