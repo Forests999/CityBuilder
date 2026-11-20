@@ -791,9 +791,33 @@ export function renderMap(ctx, doc, o) {
       }
       g.save();
       g.globalCompositeOperation = 'destination-out'; g.strokeStyle = '#000';
+      // Border streets run only along edges that no other district shares, so touching districts meet naturally.
+      const sharedWith = (x, p) => {
+        for (const o of items) {
+          if (o === x) continue;
+          const s = o.sh;
+          for (let i = 0; i < s.length; i++) if (G.projSeg(p, s[i], s[(i + 1) % s.length]).d < 2.5) return true;
+        }
+        return false;
+      };
       for (const x of items) {
         if (!(x.d.borderStreet > 0)) continue;
-        within(g, x, () => { g.beginPath(); addPath(g, x.sh, true); g.lineWidth = x.d.borderStreet + 2 * ex; g.stroke(); });
+        const runs = [];
+        let cur = null;
+        for (let i = 0; i < x.sh.length; i++) {
+          const a = x.sh[i], b = x.sh[(i + 1) % x.sh.length], n = Math.max(1, Math.ceil(G.dist(a, b) / 6));
+          for (let j = 0; j < n; j++) {
+            const p0 = G.lerp(a, b, j / n), p1 = G.lerp(a, b, (j + 1) / n);
+            if (sharedWith(x, G.lerp(p0, p1, 0.5))) { cur = null; continue; }
+            if (!cur) { cur = [p0]; runs.push(cur); }
+            cur.push(p1);
+          }
+        }
+        within(g, x, () => {
+          g.beginPath();
+          for (const r of runs) addPath(g, r, false);
+          g.lineWidth = x.d.borderStreet + 2 * ex; g.lineCap = 'butt'; g.stroke();
+        });
       }
       g.restore();
       carve(g, carvers, ex);

@@ -130,4 +130,5 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 - **Road classes:** every road is a *Main avenue* (wide), *Arc road* (medium) or *Lane* (thin); picking a class sets its kind and width. Generated cities have wide arteries to the gates, a ring road and partial arc roads between arteries, with thin generated lanes inside the districts.
 - **Junction plazas:** generated cities put a small round plaza with a dot where main and arc roads cross. In any map, *Generate → Roads & plazas → Add plazas at major junctions* does the same.
 - **Ragged outline:** *Edge roughness* in the city wizard pushes the outline in and out with bumps and notches, so the wall hugs a jagged city edge. It applies to both sketched and random outlines.
+- **Border streets** run only along district edges that no other district touches, so neighbouring districts meet without a dividing line.
 - **Main street curvature:** only the few longest streets in an organic district bow gently (they stay pinned at their ends so junctions still meet); all other streets stay as before. Set per district, 0 = straight.
