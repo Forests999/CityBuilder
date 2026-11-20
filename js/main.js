@@ -25,7 +25,7 @@ const app = {
   hits: [], space: false, mouse: null, tab: 'props', marquee: null, kit: null, kitState: defaultKitState(),
   genOutline: null, exportScale: 2,
   gen: { districts: 6, gates: 6, walled: true, river: 'through', ring: true, farmland: true, density: 'edge', halls: 6, splitMode: 'center', size: 650, roughness: 0.45, arcs: 3, junctions: true, seed: Math.floor(Math.random() * 1e9), clear: true },
-  split: { n: 5, mode: 'center', vary: true },
+  split: { n: 5, mode: 'center', vary: true, dense: false, varyStreets: true, boundaryRoads: true },
 };
 Object.defineProperty(app, 'sel', {
   get() { return this._sel; },
@@ -1240,7 +1240,25 @@ function renderGenerate(body) {
 }
 
 // Split a district into several, using the same method the city generator uses.
-function autoSplit(f, n, mode, vary, dense) {
+// Edges that two neighbouring districts share, as polylines (used to lay a road along a boundary).
+function sharedRuns(A, B) {
+  const runs = [];
+  let cur = null;
+  for (let i = 0; i < A.length; i++) {
+    const a = A[i], b = A[(i + 1) % A.length], k = Math.max(1, Math.ceil(G.dist(a, b) / 6));
+    for (let j = 0; j < k; j++) {
+      const p0 = G.lerp(a, b, j / k), p1 = G.lerp(a, b, (j + 1) / k), m = G.lerp(p0, p1, 0.5);
+      let near = false;
+      for (let q = 0; q < B.length && !near; q++) near = G.projSeg(m, B[q], B[(q + 1) % B.length]).d < 1.5;
+      if (!near) { cur = null; continue; }
+      if (!cur) { cur = [p0]; runs.push(cur); }
+      cur.push(p1);
+    }
+  }
+  return runs.filter((r) => r.length >= 5);
+}
+
+function autoSplit(f, n, mode, vary, dense, varyStreets, boundaryRoads) {
   const doc = S.getDoc();
   if (f.type !== 'district') return;
   const exact = !!(f.followWall || f.smooth);
@@ -1266,13 +1284,43 @@ function autoSplit(f, n, mode, vary, dense) {
       const pr = { ...PRESETS[presets[i]] };
       Object.assign(d, pr, { preset: presets[i], flowCenter: c.slice() });
     }
+    // Each sub-district gets its own street direction (mostly lined up with the centre, so they fan out like
+    // a real city) and block size (bigger near the middle, tighter toward the edge).
+    if (varyStreets && (d.look || 'blocks') === 'blocks' && d.pattern !== 'grid') {
+      const cc = G.centroid(cell), ang = Math.atan2(cc[1] - c[1], cc[0] - c[0]) * 180 / Math.PI;
+      const t = Math.min(1, G.dist(cc, c) / (radius || 1));
+      d.gridAngle = Math.round((rng.next() < 0.7 ? ang + rng.range(-14, 14) : rng.range(0, 90)) * 10) / 10;
+      d.blockSize = Math.max(8, Math.round(d.blockSize * (t < 0.35 ? rng.range(1.1, 1.5) : t < 0.7 ? rng.range(0.85, 1.15) : rng.range(0.6, 0.9))));
+      d.coherence = Math.max(+d.coherence || 0, 0.8);
+      if (d.pattern !== 'radial') d.pattern = 'organic';
+    }
     if (dense && (d.look || 'blocks') === 'blocks') Object.assign(d, { gradMode: 'edge', gradStrength: 0.6, gradCenter: c.slice(), gradRadius: radius });
     if (i > 0) doc.features.splice(doc.features.indexOf(f) + i, 0, d);
     ids.push(d.id);
   });
+  // Where neighbours run in different directions, a road along their shared edge hides the mismatch.
+  let made = 0;
+  if (varyStreets && boundaryRoads) {
+    const ds = ids.map((id) => S.byId(id));
+    for (let i = 0; i < cells.length; i++) {
+      for (let j = i + 1; j < cells.length; j++) {
+        const A = ds[i], B = ds[j];
+        if ((A.look || 'blocks') !== 'blocks' || (B.look || 'blocks') !== 'blocks') continue;
+        let da = Math.abs(((+A.gridAngle || 0) - (+B.gridAngle || 0)) % 90);
+        da = Math.min(da, 90 - da);
+        const ratio = Math.max(A.blockSize, B.blockSize) / Math.min(A.blockSize, B.blockSize);
+        if (da < 18 && ratio < 1.45) continue;
+        const w = Math.round((6 + Math.min(1, da / 45) * 3) * 2) / 2;
+        for (const run of sharedRuns(cells[i], cells[j])) {
+          S.insertFeature(S.createFeature('road', run, { kind: 'street', tier: 'arc', width: w, ruralOutside: false, gates: false, smooth: false }));
+          made++;
+        }
+      }
+    }
+  }
   setMulti(ids);
   S.commit();
-  toast(`Split into ${cells.length} districts, all selected. Pick any one to restyle it.`);
+  toast(`Split into ${cells.length} districts, all selected${made ? `, with ${made} boundary roads` : ''}. Pick any one to restyle it.`);
 }
 
 function buildAutoSplit(target, f) {
@@ -1287,7 +1335,9 @@ function buildAutoSplit(target, f) {
     el('div', { class: 'asrow' }, el('span', {}, 'Districts'), n, mode),
     mk('vary', 'Give each its own style'),
     mk('dense', 'Tighter blocks toward the edge'),
-    el('button', { type: 'button', class: 'wide primary', onclick: () => autoSplit(f, sp.n, sp.mode, sp.vary, sp.dense) }, 'Split automatically')));
+    mk('varyStreets', 'Vary street direction and block size'),
+    mk('boundaryRoads', 'Roads along boundaries where streets differ'),
+    el('button', { type: 'button', class: 'wide primary', onclick: () => autoSplit(f, sp.n, sp.mode, sp.vary, sp.dense, sp.varyStreets, sp.boundaryRoads) }, 'Split automatically')));
 }
 
 function renderLayers(body) {
