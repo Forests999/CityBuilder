@@ -187,6 +187,7 @@ export const SCHEMAS = {
     { k: 'showLabel', label: 'Show label', t: 'check' },
     { k: 'size', label: 'Dot size', t: 'range', min: 1, max: 30, step: 0.5 },
     { k: 'labelSize', label: 'Label size', t: 'range', min: 6, max: 80, step: 1 },
+    { k: 'labelCurve', label: 'Label curve (arch ↔ bowl)', t: 'range', min: -1, max: 1, step: 0.05 },
     { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { t: 'info', text: 'Drag the label on the map to move it relative to the dot.' },
   ],

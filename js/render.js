@@ -1062,7 +1062,7 @@ export function renderMap(ctx, doc, o) {
         if (f.showLabel && f.name) {
           const p = G.add(c, f.labelOffset || [0, 0]);
           const poly = drawText(ctx, f.name, p[0], p[1], {
-            size: f.labelSize, spacing: 0.06, family: fam('fontLabel'), upper: true, fill: C.label, halo: C.labelHalo, haloW: f.labelSize * haloOf(f),
+            size: f.labelSize, curve: f.labelCurve, spacing: 0.06, family: fam('fontLabel'), upper: true, fill: C.label, halo: C.labelHalo, haloW: f.labelSize * haloOf(f),
           });
           if (poly) hits.push({ id: f.id, kind: 'offset', poly });
         }
