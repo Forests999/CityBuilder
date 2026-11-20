@@ -474,6 +474,86 @@ function splitAreas(line, targetId) {
   toast(count === 1 ? 'Split into two. The new piece is selected.' : `Split ${count} areas.`);
 }
 
+// ---------- merging districts ----------
+// Union of polygons that share edges: edges that run in opposite directions along the same line cancel,
+// and what is left is chained into the combined outline.
+function unionPolys(polys) {
+  const key = (p) => Math.round(p[0]) + ',' + Math.round(p[1]);
+  const area = (p) => G.polyArea(p);
+  const oriented = polys.map((p) => (area(p) < 0 ? p.slice().reverse() : p.slice()));
+  const all = oriented.flat();
+  const edges = [];
+  for (const P of oriented) {
+    for (let i = 0; i < P.length; i++) {
+      const a = P[i], b = P[(i + 1) % P.length], L = G.dist(a, b);
+      const mids = [];
+      for (const q of all) {
+        if (q === a || q === b) continue;
+        const r = G.projSeg(q, a, b);
+        if (r.d < 0.75 && r.t > 0.001 && r.t < 0.999 && key(q) !== key(a) && key(q) !== key(b)) mids.push({ t: r.t, q });
+      }
+      mids.sort((m, n) => m.t - n.t);
+      const seq = [a, ...mids.map((m) => m.q), b];
+      for (let j = 0; j < seq.length - 1; j++) if (key(seq[j]) !== key(seq[j + 1])) edges.push([seq[j], seq[j + 1]]);
+    }
+  }
+  const have = new Set(edges.map(([a, b]) => key(a) + '>' + key(b)));
+  let cancelled = 0;
+  const left = edges.filter(([a, b]) => { const c = have.has(key(b) + '>' + key(a)); if (c) cancelled++; return !c; });
+  if (!cancelled) return null;
+  const from = new Map();
+  for (const e of left) { const k = key(e[0]); if (!from.has(k)) from.set(k, []); from.get(k).push(e); }
+  const used = new Set(), loops = [];
+  for (const e0 of left) {
+    if (used.has(e0)) continue;
+    const loop = [];
+    let e = e0;
+    while (e && !used.has(e)) {
+      used.add(e); loop.push(e[0]);
+      const nx = (from.get(key(e[1])) || []).filter((x) => !used.has(x));
+      e = nx[0];
+    }
+    if (loop.length >= 3) loops.push(loop);
+  }
+  if (!loops.length) return null;
+  loops.sort((a, b) => Math.abs(area(b)) - Math.abs(area(a)));
+  const out = loops[0];
+  // Drop the points that only existed to match the other district's vertices along a straight edge.
+  const n = out.length, keep = out.filter((p, i) => {
+    const a = out[(i + n - 1) % n], b = out[(i + 1) % n];
+    const u = [p[0] - a[0], p[1] - a[1]], v = [b[0] - p[0], b[1] - p[1]];
+    return Math.abs(u[0] * v[1] - u[1] * v[0]) > 0.02 * Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]);
+  });
+  return keep.length >= 3 ? keep : out;
+}
+
+function mergeSelected() {
+  const doc = S.getDoc();
+  const fs = selFeats().filter((f) => f.type === 'district' || f.type === 'farm');
+  if (fs.length < 2 || fs.some((f) => f.type !== fs[0].type)) { toast('Select two or more districts (or farms) to merge.'); return; }
+  fs.sort((a, b) => doc.features.indexOf(a) - doc.features.indexOf(b));
+  const first = fs[0];
+  let acc = featureShape(first, doc).map((p) => p.slice());
+  let rest = fs.slice(1), merged = [first];
+  for (let guard = 0; guard < fs.length && rest.length; guard++) {
+    const next = [];
+    for (const f of rest) {
+      const u = unionPolys([acc, featureShape(f, doc).map((p) => p.slice())]);
+      if (u) { acc = u; merged.push(f); } else next.push(f);
+    }
+    if (next.length === rest.length) break;
+    rest = next;
+  }
+  if (merged.length < 2) { toast('Those areas do not share an edge, so they cannot be merged.'); return; }
+  first.points = acc;
+  first.followWall = ''; first.smooth = false; first.locked = false;
+  if (first.name) first.name = first.name.replace(/ \(part\)$/, '');
+  doc.features = doc.features.filter((f) => f === first || !merged.includes(f));
+  app.sel = first.id;
+  S.commit();
+  toast(rest.length ? `Merged ${merged.length} areas; ${rest.length} did not touch them and were left alone.` : `Merged ${merged.length} areas into one.`);
+}
+
 // A street name: attaches to the road under the click and runs along its curve.
 function placeStreetName(w) {
   const doc = S.getDoc(), tol = 40 / view.s;
@@ -1010,6 +1090,10 @@ function renderMulti(body) {
   body.append(el('p', { class: 'info' }, Object.entries(counts).map(([k, v]) => `${v} × ${k}`).join(' · ')));
   body.append(el('p', { class: 'info' }, 'Drag any selected item to move them all together. Shift-click adds or removes items; Shift-drag on empty map box-selects.'));
 
+  if (fs.length > 1 && fs.every((f) => f.type === fs[0].type && (f.type === 'district' || f.type === 'farm'))) {
+    body.append(el('div', { class: 'heading' }, 'Merge'));
+    body.append(el('div', { class: 'btnrow' }, el('button', { title: 'Join the selected touching districts into one', onclick: mergeSelected }, '⊕ Merge into one')));
+  }
   body.append(el('div', { class: 'heading' }, 'Group'));
   const grouped = fs.some((f) => f.groupId);
   body.append(el('div', { class: 'btnrow' },

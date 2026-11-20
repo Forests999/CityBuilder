@@ -382,8 +382,42 @@ function subdivide(shape, o) {
     stack.push([r[0], depth + 1, state === 2, h32(hash, 1)], [r[1], depth + 1, state === 2, h32(hash, 2)]);
   }
 
+  // Only the few longest streets bow gently. The bend is a smooth displacement field applied to every
+  // point of the district (streets, blocks, nicks), so streets that meet a bowed street move with it and
+  // junctions stay joined; the bend is zero at the ends of each bowed street.
+  const bows = [];
+  if (o.curve > 0 && o.pattern === 'organic') {
+    for (const [a, b] of chords) {
+      const L0 = dist(a, b);
+      if (L0 <= bs * 7) continue;
+      let p = a, q = b;
+      if (L0 > 4 * Math.max(sb.x1 - sb.x0, sb.y1 - sb.y0)) { const cl = clipSegToBox(a, b, sb.x0 - bs, sb.y0 - bs, sb.x1 + bs, sb.y1 + bs); if (!cl) continue; [p, q] = cl; }
+      const L = dist(p, q);
+      if (L < bs * 4) continue;
+      const hh = h32(Math.round(a[0] * 7 + b[1] * 13), Math.round(a[1] * 5 + b[0] * 11));
+      const d = norm(sub(q, p));
+      bows.push({ p, d, L, nx: -d[1], ny: d[0], sgn: (hh & 1) ? 1 : -1, ph: ((hh >>> 9) % 100) / 100 * 6.28,
+        amp: Math.min(L * 0.05, bs * 1.1) * o.curve * (0.6 + ((hh >>> 3) % 100) / 250) });
+    }
+  }
+  const BR = bs * 4;
+  const bowAt = (pt) => {
+    let dx = 0, dy = 0;
+    for (const w of bows) {
+      const rx = pt[0] - w.p[0], ry = pt[1] - w.p[1];
+      const s = rx * w.d[0] + ry * w.d[1], t = Math.max(0, Math.min(1, s / w.L));
+      const ex = rx - w.d[0] * t * w.L, ey = ry - w.d[1] * t * w.L, dd = Math.hypot(ex, ey);
+      if (dd >= BR) continue;
+      const fall = 0.5 * (1 + Math.cos(Math.PI * dd / BR));
+      const sn = Math.sin(Math.PI * t), k = w.amp * fall * (sn * w.sgn + 0.35 * Math.sin(2 * Math.PI * t + w.ph) * sn);
+      dx += w.nx * k; dy += w.ny * k;
+    }
+    return [dx, dy];
+  };
+
   const fq = 1 / (bs * 3.5), A = o.warp;
-  const W = (p) => (A ? [p[0] + noise(p[0] * fq, p[1] * fq) * A, p[1] + noise(p[0] * fq + 37.2, p[1] * fq - 11.9) * A] : p);
+  const W0 = (p) => (A ? [p[0] + noise(p[0] * fq, p[1] * fq) * A, p[1] + noise(p[0] * fq + 37.2, p[1] * fq - 11.9) * A] : p);
+  const W = bows.length ? (p) => { const q = W0(p), d = bowAt(p); return [q[0] + d[0], q[1] + d[1]]; } : W0;
   const line = (a, b) => {
     const m = Math.max(1, Math.ceil(dist(a, b) / 7));
     const out = [];
@@ -404,14 +438,7 @@ function subdivide(shape, o) {
     const k0 = L0 > bs * 7 ? 1.9 : L0 > bs * 3.5 ? 1.35 : L0 < bs * 0.9 ? 0.75 : 1;
     const w = Math.round(o.streetWidth * (1 + (k0 - 1) * contrast) * 10) / 10;
     if (!buckets.has(w)) buckets.set(w, []);
-    let ln = line(p, q);
-    // Only the few longest streets bow gently (zero bend at the ends so they still meet their junctions).
-    if (o.curve > 0 && L0 > bs * 7 && o.pattern === 'organic') {
-      const hh = h32(Math.round(a[0] * 7 + b[1] * 13), Math.round(a[1] * 5 + b[0] * 11));
-      const sgn = (hh & 1) ? 1 : -1, amp = Math.min(L0 * 0.07, bs * 1.6) * o.curve * (0.6 + ((hh >>> 3) % 100) / 250);
-      const d = norm(sub(q, p)), nx = -d[1], ny = d[0], n = ln.length - 1, ph = ((hh >>> 9) % 100) / 100 * 6.28;
-      ln = ln.map((pt, i) => { const t = i / n, bow = Math.sin(Math.PI * t) * sgn + 0.35 * Math.sin(2 * Math.PI * t + ph) * Math.sin(Math.PI * t); return [pt[0] + nx * amp * bow, pt[1] + ny * amp * bow]; });
-    }
+    const ln = line(p, q);
     ln.major = L0 > bs * 3.5;
     buckets.get(w).push(ln);
   }

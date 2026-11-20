@@ -131,4 +131,5 @@ Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The site up
 - **Junction plazas:** generated cities put a small round plaza with a dot where main and arc roads cross. In any map, *Generate → Roads & plazas → Add plazas at major junctions* does the same.
 - **Ragged outline:** *Edge roughness* in the city wizard pushes the outline in and out with bumps and notches, so the wall hugs a jagged city edge. It applies to both sketched and random outlines.
 - **Border streets** run only along district edges that no other district touches, so neighbouring districts meet without a dividing line.
-- **Main street curvature:** only the few longest streets in an organic district bow gently (they stay pinned at their ends so junctions still meet); all other streets stay as before. Set per district, 0 = straight.
+- **Main street curvature:** only the few longest streets in an organic district bow gently. The bend is a smooth warp applied to everything nearby, so streets that join a bowed street move with it and junctions stay connected. Set per district, 0 = straight.
+- **Merge districts:** select two or more touching districts (or farms) and press *Merge into one* in the panel. Shared edges are removed and the first one in the layer list keeps its settings.
