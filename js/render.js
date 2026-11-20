@@ -166,9 +166,29 @@ export function drawText(ctx, text, x, y, o) {
     ctx.lineWidth = size * 0.04; ctx.strokeRect(bx + i, by + i, bw - 2 * i, bh - 2 * i);
   }
   const passes = o.halo ? ['h', 'f'] : ['f'];
+  // A curved label (single line): each letter sits on an arc, tilted to follow it.
+  const kc = lines.length === 1 && !o.boxed ? Math.max(-1, Math.min(1, +o.curve || 0)) * 1.6 : 0;
+  const Rc = kc ? maxW / kc : 0, sag = kc ? Math.abs(Rc * (1 - Math.cos(kc / 2))) : 0;
   for (const pass of passes) {
     if (pass === 'h') { ctx.strokeStyle = o.halo; ctx.lineWidth = o.haloW || size * 0.3; ctx.lineJoin = 'round'; }
     else ctx.fillStyle = o.fill;
+    if (kc) {
+      let cx = -lw[0] / 2;
+      for (const ch of lines[0]) {
+        const w = wOf(ch);
+        if (ch !== ' ') {
+          const s = cx + w / 2, ph = s / Rc;
+          ctx.save();
+          ctx.translate(Rc * Math.sin(ph), Rc * (1 - Math.cos(ph)) - (Rc > 0 ? sag : -sag) / 2);
+          ctx.rotate(ph);
+          ctx.textAlign = 'center';
+          if (pass === 'h') ctx.strokeText(ch, 0, 0); else ctx.fillText(ch, 0, 0);
+          ctx.restore();
+        }
+        cx += w + sp;
+      }
+      continue;
+    }
     lines.forEach((l, i) => {
       let cx = -lw[i] / 2;
       const cy = -th / 2 + lh * (i + 0.5);
@@ -179,6 +199,7 @@ export function drawText(ctx, text, x, y, o) {
     });
   }
   ctx.restore();
+  if (kc) { by -= sag / 2; bh += sag; }
   const a = ((o.angle || 0) * Math.PI) / 180;
   return [[bx, by], [bx + bw, by], [bx + bw, by + bh], [bx, by + bh]].map((p) => G.add(G.rotate(p, a), [x, y]));
 }
@@ -1104,7 +1125,7 @@ export function renderMap(ctx, doc, o) {
     const c = G.add(G.centroid(sh), f.labelOffset || [0, 0]);
     const water = f.type === 'water';
     const poly = drawText(ctx, f.name, c[0], c[1], {
-      size: f.labelSize, angle: f.labelAngle, spacing: f.labelSpacing, family: fam('fontLabel'), upper: true,
+      size: f.labelSize, angle: f.labelAngle, curve: f.labelCurve, spacing: f.labelSpacing, family: fam('fontLabel'), upper: true,
       fill: water ? C.waterText : C.label, halo: water ? C.waterHalo : C.labelHalo, haloW: f.labelSize * haloOf(f),
     });
     if (poly) hits.push({ id: f.id, kind: 'offset', poly });

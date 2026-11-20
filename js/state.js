@@ -21,7 +21,7 @@ export function sortByDefaultOrder(features) {
 export const DEFAULTS = {
   wall: { name: 'City Wall', gap: null, closed: true, width: 7, towerSpacing: 60, towerSize: 5, cornerTowers: true, smooth: false, gates: true },
   district: {
-    name: 'New District', showLabel: true, labelSize: 42, labelAngle: 0, labelSpacing: 0.12, labelOffset: [0, 0], halo: null,
+    name: 'New District', showLabel: true, labelSize: 42, labelAngle: 0, labelCurve: 0, labelSpacing: 0.12, labelOffset: [0, 0], halo: null,
     preset: 'standard', ...PRESETS.standard, gridAngle: 0, color: '', borderStreet: 3,
     treeSpacing: 15, treeDensity: 0.55, graveSpacing: 8, alignRoads: true,
     gradMode: 'none', gradStrength: 0.6, gradCenter: null, gradRadius: 0, border: true, blockVariety: 0.6, edgeFade: 0.45, coherence: 0.55, streetContrast: 0.35, majorCurve: 0.6, flowCenter: null, flowRadial: 0.6,
@@ -29,11 +29,11 @@ export const DEFAULTS = {
   },
   cutout: { name: '', fill: 'none', gap: 0, border: true, smooth: false },
   farm: {
-    name: '', showLabel: false, labelSize: 32, labelAngle: 0, labelSpacing: 0.15, labelOffset: [0, 0], halo: null,
+    name: '', showLabel: false, labelSize: 32, labelAngle: 0, labelCurve: 0, labelSpacing: 0.15, labelOffset: [0, 0], halo: null,
     parcelSize: 110, pattern: 'organic', irregularity: 0.6, warp: 6, gridAngle: 0,
     furrows: true, furrowSpacing: 6, hedges: true, smooth: false, clipWall: '', seed: 1,
   },
-  water: { name: '', showLabel: false, labelSize: 48, labelAngle: 0, labelSpacing: 0.25, labelOffset: [0, 0], halo: null, coastLines: 3, gap: null, border: true, smooth: true },
+  water: { name: '', showLabel: false, labelSize: 48, labelAngle: 0, labelCurve: 0, labelSpacing: 0.25, labelOffset: [0, 0], halo: null, coastLines: 3, gap: null, border: true, smooth: true },
   river: { name: 'River', showLabel: true, labelSize: 34, labelSpacing: 1.0, labelPos: 0.5, labelOpacity: 0.7, halo: null, width: 60, wobble: 0.15, canal: false, gap: null, border: true, smooth: true },
   road: { name: '', kind: 'avenue', width: 13, ruralOutside: true, gates: true, closed: false, steer: true, border: true, tier: 'artery', smooth: true },
   plaza: { name: '', border: true, radius: 22, shape: 'round', aspect: 1, angle: 0, monument: 'dot' },
