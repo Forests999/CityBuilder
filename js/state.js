@@ -24,7 +24,7 @@ export const DEFAULTS = {
     name: 'New District', showLabel: true, labelSize: 42, labelAngle: 0, labelSpacing: 0.12, labelOffset: [0, 0], halo: null,
     preset: 'standard', ...PRESETS.standard, gridAngle: 0, color: '', borderStreet: 3,
     treeSpacing: 15, treeDensity: 0.55, graveSpacing: 8, alignRoads: true,
-    gradMode: 'none', gradStrength: 0.6, gradCenter: null, gradRadius: 0, border: true, blockVariety: 0.6, edgeFade: 0.45, coherence: 0.55, streetContrast: 0.35, flowCenter: null, flowRadial: 0.6,
+    gradMode: 'none', gradStrength: 0.6, gradCenter: null, gradRadius: 0, border: true, blockVariety: 0.6, edgeFade: 0.45, coherence: 0.55, streetContrast: 0.35, majorCurve: 0.6, flowCenter: null, flowRadial: 0.6,
     smooth: false, followWall: '', clipWall: '', seed: 1,
   },
   cutout: { name: '', fill: 'none', gap: 0, border: true, smooth: false },

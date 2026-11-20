@@ -39,6 +39,7 @@ export const SCHEMAS = {
     { k: 'coherence', label: 'Street order', t: 'range', min: 0, max: 1, step: 0.05, show: (f) => (f.look || 'blocks') === 'blocks' && (f.pattern === 'organic' || f.pattern === 'flowing') },
     { k: 'streetContrast', label: 'Street width variety', t: 'range', min: 0, max: 1, step: 0.05, show: (f) => (f.look || 'blocks') === 'blocks' },
     { t: 'info', text: 'Street order: higher gives straighter, more parallel streets with right-angle crossings (tidier); lower is more organic. Width variety: 0 makes every street the same width.', show: (f) => (f.look || 'blocks') === 'blocks' && (f.pattern === 'organic' || f.pattern === 'flowing') },
+    { k: 'majorCurve', label: 'Main street curvature', t: 'range', min: 0, max: 1, step: 0.05, show: (f) => (f.look || 'blocks') === 'blocks' && f.pattern === 'organic' },
     { k: 'blockVariety', label: 'Block shape variety', t: 'range', min: 0, max: 1, step: 0.05, show: (f) => (f.look || 'blocks') === 'blocks' },
     { k: 'edgeFade', label: 'Fade streets at free edges', t: 'range', min: 0, max: 1, step: 0.05, show: (f) => (f.look || 'blocks') === 'blocks' },
     { t: 'info', text: 'Variety adds chamfered or rounded corners, notches and curved bites to blocks. Fading stops streets short of an edge that has no neighbouring district, so the city ends in solid frontage instead of roads leading nowhere.', show: (f) => (f.look || 'blocks') === 'blocks' },

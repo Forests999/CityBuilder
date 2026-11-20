@@ -88,7 +88,7 @@ export function districtGen(f, shape, center, guides) {
   const key = ['d', pattern, f.blockSize, f.streetWidth, f.irregularity, f.warp, f.gridAngle, f.lots, f.courtyards, f.seed, look,
     look === 'garden' ? f.treeSpacing + ',' + f.treeDensity : look === 'cemetery' ? f.graveSpacing : '',
     grad ? [grad.mode, grad.strength, Math.round(grad.c[0]), Math.round(grad.c[1]), Math.round(grad.r)].join(',') : '',
-    f.blockVariety == null ? 0.6 : f.blockVariety, f.coherence == null ? 0.55 : f.coherence, f.streetContrast == null ? 0.35 : f.streetContrast,
+    f.blockVariety == null ? 0.6 : f.blockVariety, f.coherence == null ? 0.55 : f.coherence, f.streetContrast == null ? 0.35 : f.streetContrast, f.majorCurve == null ? 0.6 : f.majorCurve,
     useFlow ? (focus ? focus.map(Math.round).join(',') : 'c') + ',' + (f.flowRadial == null ? 0.6 : f.flowRadial) : '',
     guides && guides.list.length ? guides.key : '',
     pattern === 'radial' ? center.map(Math.round).join(',') : '', shapeKey(shape)].join('|');
@@ -101,6 +101,7 @@ export function districtGen(f, shape, center, guides) {
       variety: look === 'blocks' ? Math.max(0, Math.min(1, f.blockVariety == null ? 0.6 : +f.blockVariety)) : 0,
       coherence: f.coherence == null ? 0.55 : +f.coherence, contrast: f.streetContrast == null ? 0.35 : +f.streetContrast,
       focus, radial: f.flowRadial == null ? 0.6 : +f.flowRadial,
+      curve: f.majorCurve == null ? 0.6 : +f.majorCurve,
     };
     const g = useFlow ? flowSubdivide(shape, opts) : subdivide(shape, opts);
     g.decor = look !== 'blocks' ? lookDecor(f, shape, g, look) : null;
@@ -403,7 +404,14 @@ function subdivide(shape, o) {
     const k0 = L0 > bs * 7 ? 1.9 : L0 > bs * 3.5 ? 1.35 : L0 < bs * 0.9 ? 0.75 : 1;
     const w = Math.round(o.streetWidth * (1 + (k0 - 1) * contrast) * 10) / 10;
     if (!buckets.has(w)) buckets.set(w, []);
-    const ln = line(p, q);
+    let ln = line(p, q);
+    // Only the few longest streets bow gently (zero bend at the ends so they still meet their junctions).
+    if (o.curve > 0 && L0 > bs * 7 && o.pattern === 'organic') {
+      const hh = h32(Math.round(a[0] * 7 + b[1] * 13), Math.round(a[1] * 5 + b[0] * 11));
+      const sgn = (hh & 1) ? 1 : -1, amp = Math.min(L0 * 0.07, bs * 1.6) * o.curve * (0.6 + ((hh >>> 3) % 100) / 250);
+      const d = norm(sub(q, p)), nx = -d[1], ny = d[0], n = ln.length - 1, ph = ((hh >>> 9) % 100) / 100 * 6.28;
+      ln = ln.map((pt, i) => { const t = i / n, bow = Math.sin(Math.PI * t) * sgn + 0.35 * Math.sin(2 * Math.PI * t + ph) * Math.sin(Math.PI * t); return [pt[0] + nx * amp * bow, pt[1] + ny * amp * bow]; });
+    }
     ln.major = L0 > bs * 3.5;
     buckets.get(w).push(ln);
   }
