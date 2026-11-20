@@ -194,7 +194,7 @@ export const SCHEMAS = {
     { k: 'halo', label: 'Label border', t: 'optrange', min: 0, max: 0.8, step: 0.01 },
     { k: 'haloColor', label: 'Label border color', t: 'color' },
     { k: 'labelColor', label: 'Text color', t: 'color' },
-    { t: 'info', text: 'Drag the label on the map to move it relative to the dot.' },
+    { t: 'info', text: 'Drag the label to move the whole landmark; Ctrl-drag the label to move it relative to the dot.' },
   ],
   label: [
     { k: 'text', label: 'Text', t: 'textarea' },

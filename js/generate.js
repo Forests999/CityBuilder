@@ -389,15 +389,17 @@ function subdivide(shape, o) {
   if (o.curve > 0 && o.pattern === 'organic') {
     for (const [a, b] of chords) {
       const L0 = dist(a, b);
-      if (L0 <= bs * 7) continue;
+      if (L0 <= bs * 2.2) continue;
       let p = a, q = b;
       if (L0 > 4 * Math.max(sb.x1 - sb.x0, sb.y1 - sb.y0)) { const cl = clipSegToBox(a, b, sb.x0 - bs, sb.y0 - bs, sb.x1 + bs, sb.y1 + bs); if (!cl) continue; [p, q] = cl; }
       const L = dist(p, q);
-      if (L < bs * 4) continue;
+      const hh0 = h32(Math.round(a[1] * 3 + b[0] * 17), Math.round(a[0] * 11 + b[1] * 5));
+      const big = L >= bs * 7 && L0 > bs * 7;
+      if (!big && (((hh0 >>> 5) % 100) >= 11 || L < bs * 2.2)) continue;
       const hh = h32(Math.round(a[0] * 7 + b[1] * 13), Math.round(a[1] * 5 + b[0] * 11));
       const d = norm(sub(q, p));
       bows.push({ p, d, L, nx: -d[1], ny: d[0], sgn: (hh & 1) ? 1 : -1, ph: ((hh >>> 9) % 100) / 100 * 6.28,
-        amp: Math.min(L * 0.05, bs * 1.1) * o.curve * (0.6 + ((hh >>> 3) % 100) / 250) });
+        amp: (big ? Math.min(L * 0.05, bs * 1.1) : Math.min(L * 0.07, bs * 0.55)) * o.curve * (0.6 + ((hh >>> 3) % 100) / 250), R: big ? bs * 4 : bs * 1.8 });
     }
   }
   const BR = bs * 4;
@@ -407,8 +409,8 @@ function subdivide(shape, o) {
       const rx = pt[0] - w.p[0], ry = pt[1] - w.p[1];
       const s = rx * w.d[0] + ry * w.d[1], t = Math.max(0, Math.min(1, s / w.L));
       const ex = rx - w.d[0] * t * w.L, ey = ry - w.d[1] * t * w.L, dd = Math.hypot(ex, ey);
-      if (dd >= BR) continue;
-      const fall = 0.5 * (1 + Math.cos(Math.PI * dd / BR));
+      if (dd >= w.R) continue;
+      const fall = 0.5 * (1 + Math.cos(Math.PI * dd / w.R));
       const sn = Math.sin(Math.PI * t), k = w.amp * fall * (sn * w.sgn + 0.35 * Math.sin(2 * Math.PI * t + w.ph) * sn);
       dx += w.nx * k; dy += w.ny * k;
     }
@@ -435,7 +437,7 @@ function subdivide(shape, o) {
       if (!clipped) continue;
       [p, q] = clipped;
     }
-    const k0 = L0 > bs * 7 ? 1.9 : L0 > bs * 3.5 ? 1.35 : L0 < bs * 0.9 ? 0.75 : 1;
+    const k0 = L0 > bs * 7 ? 2.5 : L0 > bs * 3.5 ? 1.6 : L0 < bs * 0.9 ? 0.75 : 1;
     const w = Math.round(o.streetWidth * (1 + (k0 - 1) * contrast) * 10) / 10;
     if (!buckets.has(w)) buckets.set(w, []);
     const ln = line(p, q);

@@ -839,7 +839,8 @@ canvas.addEventListener('pointerdown', (e) => {
   const inMulti = app.selSet.size > 1 && app.selSet.has(hit.id);
   if (!inMulti && hit.id !== app.sel) select(hit.id);
   const f = S.byId(hit.id);
-  const mode = inMulti ? 'move' : hit.kind === 'offset' ? 'offset' : hit.kind === 'pathpos' ? 'pathpos' : 'move';
+  const labelOnly = hit.kind === 'offset' && (f.type !== 'landmark' || e.ctrlKey || e.metaKey);
+  const mode = inMulti ? 'move' : labelOnly ? 'offset' : hit.kind === 'pathpos' ? 'pathpos' : 'move';
   const ids = mode === 'move' ? (inMulti ? selIds() : [f.id]) : [f.id];
   app.drag = {
     mode, id: f.id, start: w, moved: false, ids,
